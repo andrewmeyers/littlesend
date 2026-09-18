@@ -1,14 +1,14 @@
 import Foundation
 
-/// Everything the pipeline needs, gathered from Settings and the Keychain.
+/// Everything the pipeline needs, gathered from Settings.
 public struct SendConfiguration: Sendable {
-    public var instaparserAPIKey: String
-
     // Destinations. At least one must be active.
     public var sendToKindle: Bool
     public var kindleAddress: String
     /// Write the EPUB to a folder the user sees (the Desktop).
     public var saveToDesktop: Bool
+    /// Which format the Desktop copy is saved in.
+    public var desktopFormat: DesktopFormat
     public var emailRecipients: [String]
     public var attachBookToEmail: Bool
     /// Embed shrunk images in the email rather than linking to the originals.
@@ -27,10 +27,10 @@ public struct SendConfiguration: Sendable {
     public var coverStyle: CoverStyle
 
     public init(
-        instaparserAPIKey: String,
         sendToKindle: Bool = true,
         kindleAddress: String,
         saveToDesktop: Bool = false,
+        desktopFormat: DesktopFormat = .epub,
         emailRecipients: [String] = [],
         attachBookToEmail: Bool = false,
         embedImagesInEmail: Bool = true,
@@ -44,10 +44,10 @@ public struct SendConfiguration: Sendable {
         imageSizeLimitBytes: Int? = 600 * 1024,
         coverStyle: CoverStyle = .default
     ) {
-        self.instaparserAPIKey = instaparserAPIKey
         self.sendToKindle = sendToKindle
         self.kindleAddress = kindleAddress
         self.saveToDesktop = saveToDesktop
+        self.desktopFormat = desktopFormat
         self.emailRecipients = emailRecipients
         self.attachBookToEmail = attachBookToEmail
         self.embedImagesInEmail = embedImagesInEmail
@@ -64,7 +64,10 @@ public struct SendConfiguration: Sendable {
 
     /// True when an EPUB has to be produced at all.
     public var needsBook: Bool {
-        sendToKindle || saveToDesktop || (attachBookToEmail && !emailRecipients.isEmpty)
+        // Only a Desktop copy saved *as* an EPUB needs one; the other formats
+        // are rendered straight from the article.
+        sendToKindle || (saveToDesktop && desktopFormat == .epub)
+            || (attachBookToEmail && !emailRecipients.isEmpty)
     }
 
     /// True when images must be downloaded, for either destination.
@@ -76,8 +79,6 @@ public struct SendConfiguration: Sendable {
     /// Human-readable reasons the configuration is not yet usable.
     public var validationProblems: [String] {
         var problems: [String] = []
-        if instaparserAPIKey.isEmpty { problems.append("Instaparser API key is missing.") }
-
         if !sendToKindle, !saveToDesktop, emailRecipients.isEmpty {
             problems.append("No destination is selected — pick one in the menu bar.")
         }
@@ -105,18 +106,11 @@ public struct SendConfiguration: Sendable {
     }
 }
 
-/// Which parser to run. The local reader is a manual fallback, never the
-/// default — it is much slower and spins up a web view.
-public enum ArticleParserChoice: String, Sendable {
-    case instaparser
-    case localReader
-}
-
-public enum SendStage: String, Sendable {
-    case parsing = "Parsing article…"
-    case parsingLocally = "Reading page locally…"
+public enum SendStage: String, CaseIterable, Sendable {
+    case parsing = "Reading article…"
     case fetchingImages = "Fetching images…"
     case buildingBook = "Building EPUB…"
+    case readingFile = "Reading file…"
     case sending = "Sending…"
 }
 
@@ -145,6 +139,11 @@ public struct SendOutcome: Sendable {
     public let usedTextFallback: Bool
     public let usedFallbackFont: Bool
     public let hasCover: Bool
+    /// Words in the article, for a reading-time estimate. Nil for a file sent
+    /// as-is, which is never opened here.
+    public let wordCount: Int?
+    /// Web pages the article was read from; 1 unless it was paginated.
+    public let pageCount: Int
     public let deliveries: [DeliveryResult]
     /// Folder holding this send's files, when archiving is on.
     public let archiveFolder: URL?
@@ -172,9 +171,76 @@ public struct ArticleSender {
         self.desktopExporter = desktopExporter
     }
 
+    /// Sends a local file as-is to Kindle.
+    ///
+    /// Kindle only, by design. No parsing, no EPUB, no cover: Send to Kindle
+    /// already converts the formats it accepts, and rebuilding a PDF or a Word
+    /// document as an EPUB would lose more than it gained. The other
+    /// destinations do not apply — email has its own attachment flow, and
+    /// copying a local file back to the Desktop is not a delivery.
+    public func send(
+        file fileURL: URL,
+        progress: @Sendable (SendStage) -> Void = { _ in }
+    ) async throws -> SendOutcome {
+        guard configuration.sendToKindle else {
+            throw FileAttachment.Failure.kindleNotSelected
+        }
+        guard SendConfiguration.looksLikeEmail(configuration.kindleAddress) else {
+            throw SMTPError(code: nil, message: "Kindle address is missing or malformed.")
+        }
+
+        progress(.readingFile)
+        // Reading is synchronous and can be slow on a large file, so it is kept
+        // off the caller's actor rather than blocking the UI mid-send.
+        let attachment = try await Task.detached { try FileAttachment(contentsOf: fileURL) }.value
+
+        // Refused here rather than at Amazon, which drops what it cannot
+        // convert without sending back so much as a bounce.
+        guard attachment.isAcceptedByKindle else {
+            throw FileAttachment.Failure.unsupportedByKindle(attachment.fileExtension)
+        }
+
+        progress(.sending)
+        let delivery = await deliver(
+            kind: .kindle,
+            recipients: [configuration.kindleAddress],
+            message: fileMessage(attachment, to: [configuration.kindleAddress])
+        )
+
+        return SendOutcome(
+            title: attachment.displayTitle,
+            fileName: attachment.fileName,
+            byteCount: attachment.byteCount,
+            embeddedImageCount: 0,
+            resizedImageCount: 0,
+            usedTextFallback: false,
+            usedFallbackFont: false,
+            hasCover: false,
+            wordCount: nil,
+            pageCount: 1,
+            deliveries: [delivery],
+            archiveFolder: nil
+        )
+    }
+
+    private func fileMessage(_ attachment: FileAttachment, to recipients: [String]) -> MailMessage {
+        MailMessage(
+            fromAddress: configuration.fromAddress,
+            fromName: configuration.fromName,
+            toAddresses: recipients,
+            subject: attachment.displayTitle,
+            plainTextBody: "\(attachment.fileName)\n\nSent by LittleSend.",
+            attachment: MailMessage.Attachment(
+                fileName: attachment.fileName,
+                mediaType: attachment.mediaType,
+                data: attachment.data
+            )
+        )
+    }
+
     public func send(
         url: URL,
-        using parser: ArticleParserChoice = .instaparser,
+        onPage: @Sendable (Int) -> Void = { _ in },
         progress: @Sendable (SendStage) -> Void = { _ in }
     ) async throws -> SendOutcome {
         let problems = configuration.validationProblems
@@ -182,15 +248,13 @@ public struct ArticleSender {
             throw SMTPError(code: nil, message: problems.joined(separator: " "))
         }
 
-        let article: ParsedArticle
-        switch parser {
-        case .instaparser:
-            progress(.parsing)
-            let client = InstaparserClient(apiKey: configuration.instaparserAPIKey, session: session)
-            article = try await client.parse(url: url)
-        case .localReader:
-            progress(.parsingLocally)
-            article = try await LocalArticleParser().parse(url: url)
+        // Read on this Mac, in a hidden WebKit view running Readability. No
+        // account, no API key, and no third party learns what is being read.
+        progress(.parsing)
+        // Later pages report their number rather than a fixed stage: a long
+        // review can take a minute, and a count that climbs shows it has not hung.
+        let article = try await LocalArticleParser().parse(url: url) { page in
+            onPage(page)
         }
 
         var book: EPUBBuilder.Result?
@@ -232,7 +296,7 @@ public struct ArticleSender {
             }
 
             let wantsEInk = configuration.coverStyle.optimizeForEInk && configuration.sendToKindle
-            let wantsColor = configuration.saveToDesktop
+            let wantsColor = (configuration.saveToDesktop && configuration.desktopFormat == .epub)
                 || (configuration.attachBookToEmail && !configuration.emailRecipients.isEmpty)
                 || !configuration.coverStyle.optimizeForEInk
 
@@ -259,8 +323,8 @@ public struct ArticleSender {
         if configuration.sendToKindle, let kindleBook = eInkBook ?? colorBook {
             deliveries.append(await deliverToKindle(article: article, book: kindleBook))
         }
-        if configuration.saveToDesktop, let desktopBook = colorBook ?? eInkBook {
-            deliveries.append(saveToDesktop(book: desktopBook))
+        if configuration.saveToDesktop {
+            deliveries.append(await saveDesktopCopy(article: article, book: colorBook ?? eInkBook))
         }
         var emailHTML: String?
         if !configuration.emailRecipients.isEmpty {
@@ -300,6 +364,8 @@ public struct ArticleSender {
             usedTextFallback: book?.usedTextFallback ?? false,
             usedFallbackFont: cover?.usedFallbackFont ?? false,
             hasCover: book?.hasCover ?? false,
+            wordCount: ReadingTime.wordCount(ofHTML: article.html),
+            pageCount: article.pageCount,
             deliveries: deliveries,
             archiveFolder: archiveFolder
         )
@@ -309,7 +375,46 @@ public struct ArticleSender {
 
     /// Writes the EPUB where the user can see it. Unlike the mail
     /// destinations there is no network involved, so this is synchronous.
-    private func saveToDesktop(book: EPUBBuilder.Result) -> DeliveryResult {
+    /// The Desktop copy, in whichever format was chosen for it.
+    private func saveDesktopCopy(article: ParsedArticle, book: EPUBBuilder.Result?) async -> DeliveryResult {
+        let format = configuration.desktopFormat
+        let data: Data
+        do {
+            switch format {
+            case .epub:
+                guard let book else {
+                    throw DesktopExporter.Failure.couldNotWrite("the EPUB was not built")
+                }
+                data = book.data
+            case .pdf:
+                // The originals, not the copies shrunk for the EPUB: those are
+                // cut to a byte budget, and a printed page needs pixels. The
+                // renderer brings them down to 300 dpi itself.
+                let urls = EPUBBuilder.imageURLs(
+                    inXHTML: HTMLToXHTML.convert(article.html),
+                    relativeTo: URL(string: article.url)
+                )
+                let originals = await ImageFetcher(
+                    session: session,
+                    limits: ImageFetcher.Limits(targetBytes: nil)
+                ).fetch(urls: urls)
+                data = try await PDFRenderer.render(article: article, images: originals)
+            case .markdown:
+                data = Data(DocumentRenderer.markdown(for: article).utf8)
+            case .text:
+                data = Data(DocumentRenderer.plainText(for: article).utf8)
+            }
+        } catch {
+            return DeliveryResult(
+                kind: .desktop,
+                recipients: [],
+                errorMessage: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            )
+        }
+        return saveToDesktop(data: data, fileName: DocumentRenderer.fileName(for: article, format: format))
+    }
+
+    private func saveToDesktop(data: Data, fileName: String) -> DeliveryResult {
         let exporter: DesktopExporter
         do {
             exporter = try desktopExporter ?? DesktopExporter(folder: DesktopExporter.defaultFolder())
@@ -322,7 +427,7 @@ public struct ArticleSender {
         }
 
         do {
-            let saved = try exporter.save(book.data, fileName: book.fileName)
+            let saved = try exporter.save(data, fileName: fileName)
             // The path rides along in `recipients` so the popover can show and
             // reveal exactly which file was written.
             return DeliveryResult(kind: .desktop, recipients: [saved.url.path], errorMessage: nil)

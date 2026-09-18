@@ -8,13 +8,11 @@ final class SettingsDraftTests: XCTestCase {
         from: String = "me@gmail.com",
         host: String = "smtp.gmail.com",
         user: String = "me@gmail.com",
-        password: String = "secret",
-        key: String = "abc123"
+        password: String = "secret"
     ) -> SettingsDraft {
         SettingsDraft(
             kindleAddress: kindle, fromAddress: from, smtpHost: host,
-            smtpPort: 465, smtpUsername: user, smtpPassword: password,
-            instaparserAPIKey: key
+            smtpPort: 465, smtpUsername: user, smtpPassword: password
         )
     }
 
@@ -23,7 +21,7 @@ final class SettingsDraftTests: XCTestCase {
     func testWhitespaceIsTrimmedFromEveryField() {
         let messy = draft(
             kindle: "  me@kindle.com ", from: "me@gmail.com\n", host: " smtp.gmail.com",
-            user: "\tme@gmail.com ", password: " secret ", key: "  abc123  "
+            user: "\tme@gmail.com ", password: " secret "
         )
         let clean = messy.normalized
 
@@ -32,7 +30,6 @@ final class SettingsDraftTests: XCTestCase {
         XCTAssertEqual(clean.smtpHost, "smtp.gmail.com")
         XCTAssertEqual(clean.smtpUsername, "me@gmail.com")
         XCTAssertEqual(clean.smtpPassword, "secret")
-        XCTAssertEqual(clean.instaparserAPIKey, "abc123")
     }
 
     func testNormalizationIsIdempotent() {
@@ -92,7 +89,6 @@ final class SettingsDraftTests: XCTestCase {
 
     func testValidationSeesThroughWhitespaceOnlyInput() {
         // A field holding only spaces is missing, not present.
-        XCTAssertFalse(draft(key: "   ").validationProblems.isEmpty)
         XCTAssertFalse(draft(password: "   ").validationProblems.isEmpty)
     }
 
@@ -128,7 +124,6 @@ final class SettingsCompletenessTests: XCTestCase {
             smtpPort: 465,
             smtpUsername: "me@gmail.com",
             smtpPassword: "pw",
-            instaparserAPIKey: "key",
             sendToKindle: false,
             sendToEmail: false,
             emailAddresses: addresses
@@ -161,11 +156,9 @@ final class SettingsCompletenessTests: XCTestCase {
         // SMTP only matters once there is something to mail — see
         // testDesktopOnlyNeedsNoMailCredentials for the other half of this.
         var missing = draft(addresses: ["a@x.com"])
-        missing.instaparserAPIKey = ""
         missing.smtpPassword = ""
         let problems = missing.settingsProblems
 
-        XCTAssertTrue(problems.contains { $0.contains("API key") })
         XCTAssertTrue(problems.contains { $0.contains("password") })
     }
 

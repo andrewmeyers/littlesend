@@ -1,8 +1,8 @@
 # LittleSend
 
 A macOS menubar app that takes an article URL, extracts the readable content
-with the [Instaparser Article API](https://www.instaparser.com/docs/1/article_api),
-builds an EPUB with a generated cover, and emails it to your Kindle.
+on your Mac with Mozilla's Readability, builds an EPUB with a generated cover,
+and emails it to your Kindle. No account or API key is needed to read articles.
 
 ## Setup
 
@@ -18,7 +18,7 @@ automatically, add it under System Settings → General → Login Items.
 `./Scripts/build-app.sh` builds to `build/LittleSend.app` without installing,
 and `./Scripts/install.sh ~/Applications` installs somewhere else.
 
-The app lives in the menubar (no Dock icon). Open it and choose **Settings…**.
+The app has a Dock icon and a menubar icon; either one opens it. Open it and choose **Settings…**.
 
 Everything is configurable; the fields are prefilled with sensible defaults:
 
@@ -35,7 +35,7 @@ Nothing is written until then, so a half-typed address never reaches the send
 pipeline and the Keychain is touched once per save rather than once per
 keystroke.
 
-All settings, **including the Instaparser API key and the SMTP password**, are
+All settings, **including the SMTP password**, are
 stored in the app's UserDefaults plist in plain text. That file is readable by
 any process running as you and is included in backups. Earlier versions used the
 Keychain; anything still there is migrated across and cleared on first launch.
@@ -55,27 +55,33 @@ its spaces.
    Devices → Preferences → Personal Document Settings*. Amazon silently drops
    mail from unapproved addresses — there is no bounce and no error.
 
-## When the parser fails
+## How articles are read
 
-Some sites refuse plain HTTP clients outright. `curl` of a gatesnotes.com
-article returns **403** with no article markup at all, and Instaparser returns
-**412 "could not extract"** for the same reason — its fetcher is refused too.
-A real browser is served the page without complaint.
+Every article is read on this Mac. The page is loaded in a hidden `WKWebView`
+and Mozilla's Readability is run against the live DOM. There is no hosted
+parser: no account, no API key, no quota, and no third party learns what you
+read. The cost is a few seconds per article while the page loads.
 
-So a failed parse offers a **local reader**: the page is loaded in a hidden
-`WKWebView` and Mozilla's Readability is run against the live DOM. Being an
-actual browser is the whole trick; a side benefit is that client-rendered pages
-have executed their JavaScript by the time the DOM is read.
+Being an actual browser is what makes this reliable. Some sites refuse plain
+HTTP clients outright — `curl` of a gatesnotes.com article returns **403** with
+no article markup at all — while serving the same URL to a browser without
+complaint. A side benefit is that client-rendered pages have executed their
+JavaScript by the time the DOM is read.
 
-It is **manual on purpose**. It is far slower than an API call and spins up a
-web view, so it appears as a "Try" button after a failure rather than running
-automatically. It is offered only when the hosted parser was what failed — a
-delivery failure, or the local reader failing in turn, would not be helped by
-it.
+**Multi-page articles** are followed to their later pages and joined into one
+book. The rule for what counts as a later page is deliberately strict: a link is
+followed only when its address is the first page's address with the next page
+number added — `/story` → `/story/2`, `/story/page/2`, or `?page=2` with every
+other parameter unchanged. `rel="next"` links are tried first but must pass the
+same test, because some sites use `rel="next"` for the next *article*, and
+stitching an unrelated story onto a book is worse than stopping at page 1.
+Reading stops at 10 pages, at an HTTP error, at a redirect away from the
+article, or at a page whose text repeats one already read. A later page failing
+keeps the pages already read.
 
 Readability is **vendored** at `Sources/LittleSendCore/Resources/Readability.js`
-(Apache 2.0, © Arc90 Inc, pinned at 0.5.0) so the fallback needs no network of
-its own and cannot drift. `Scripts/build-app.sh` copies it into
+(Apache 2.0, © Arc90 Inc, pinned at 0.5.0) so reading needs no network of its
+own beyond the page and cannot drift. `Scripts/build-app.sh` copies it into
 `Contents/Resources`, which is where `Bundle.main` looks — SwiftPM's own
 `Bundle.module` accessor is unusable here, since it searches beside the bundle
 root and otherwise a hardcoded `.build` path from the build machine, and calls
@@ -88,9 +94,9 @@ Three destinations, independently switchable, all fed by the same parse:
 - **Kindle** — the EPUB, mailed as an attachment to your Send to Kindle address.
 - **Email** — the article as a formatted HTML message, to any number of
   addresses. Optionally attach the EPUB as well.
-- **Desktop** — the EPUB written straight to `~/Desktop`. Needs nothing
-  configured (no addresses, no SMTP), so it works on its own with just an
-  Instaparser key. Sending the same article twice leaves both copies:
+- **Desktop** — a copy written straight to `~/Desktop`, as EPUB, PDF,
+  Markdown or plain text. Needs nothing configured (no addresses, no SMTP),
+  so it works on its own. Sending the same article twice leaves both copies:
   the second becomes "Article 2.epub" rather than overwriting, the way a
   download would. Off by default — writing files to someone's Desktop
   uninvited should be asked for, not assumed.
@@ -157,7 +163,7 @@ keeps a list of recent sends with per-item errors.
 ## How it works
 
 ```
-URL → Instaparser → HTML→XHTML normalizer → image fetch → EPUB → MIME → SMTP → Kindle
+URL → local reader (WebKit + Readability) → HTML→XHTML normalizer → image fetch → EPUB → MIME → SMTP → Kindle
 ```
 
 `Sources/LittleSendCore` holds the whole pipeline and has no UI dependency, so
@@ -165,7 +171,8 @@ it is fully testable:
 
 | File | Responsibility |
 | --- | --- |
-| `Instaparser.swift` | API client and error mapping |
+| `LocalArticleParser.swift` | Loads the page in a hidden WebKit view and runs Readability |
+| `ParsedArticle.swift` | The extracted article every destination is built from |
 | `ArticleTitle.swift` | Strips site branding from titles, using the `<h1>` |
 | `ArticleEmailRenderer.swift` | Renders the article as an HTML email |
 | `HTMLToXHTML.swift` | Tag-rewriting scanner producing well-formed XHTML |

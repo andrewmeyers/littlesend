@@ -93,7 +93,7 @@ struct CoverLayoutGallery: View {
                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 .imageScale(.medium)
             Text(layout.displayName)
-                .font(.caption)
+                .font(.appLabel)
                 .foregroundStyle(isSelected ? Color.primary : .secondary)
         }
         .accessibilityHidden(true)

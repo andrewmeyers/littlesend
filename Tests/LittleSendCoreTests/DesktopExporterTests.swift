@@ -78,7 +78,6 @@ final class DesktopDestinationTests: XCTestCase {
         smtpPassword: String = "pw"
     ) -> SendConfiguration {
         SendConfiguration(
-            instaparserAPIKey: "key",
             sendToKindle: kindle,
             kindleAddress: kindle ? "me@kindle.com" : "",
             saveToDesktop: desktop,
@@ -123,7 +122,6 @@ final class DesktopDestinationTests: XCTestCase {
 
     func testDesktopAppearsInTheSendToSummary() {
         var draft = SettingsDraft(
-            instaparserAPIKey: "key",
             sendToKindle: false,
             sendToEmail: false,
             saveToDesktop: true
@@ -135,7 +133,7 @@ final class DesktopDestinationTests: XCTestCase {
     }
 
     func testDesktopAloneIsCompleteWithoutAnyAddresses() {
-        let draft = SettingsDraft(instaparserAPIKey: "key", saveToDesktop: true)
+        let draft = SettingsDraft(saveToDesktop: true)
         XCTAssertEqual(draft.settingsProblems, [], "Desktop needs no addresses or SMTP")
     }
 }

@@ -1,0 +1,50 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.10196,0.36078,0.40000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "page.png",
+          "name": "Page + copy"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "fold.png",
+          "name": "Folded corner"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": [
+      "iOS",
+      "macOS"
+    ]
+  }
+}
