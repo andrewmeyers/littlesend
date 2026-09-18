@@ -16,10 +16,14 @@
     <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>LittleSend</string>
+    <key>CFBundleIconName</key>
+    <string>LittleSend</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>LittleSend reads the address of your front browser tab so it can fill the URL field for you.</string>
     <key>NSHumanReadableCopyright</key>
     <string></string>
 </dict>

@@ -23,6 +23,22 @@ cp Support/Info.plist "$APP/Contents/Info.plist"
 cp Sources/LittleSendCore/Resources/Readability.js "$APP/Contents/Resources/Readability.js"
 echo "Bundled Readability.js"
 
+# The icon is an Icon Composer bundle. actool turns it into Assets.car, which
+# macOS 26 draws with Liquid Glass and its dark and tinted looks, plus
+# LittleSend.icns for macOS 14 and 15. Info.plist names both
+# (CFBundleIconName and CFBundleIconFile). Paths are absolute because actool
+# does not resolve relative ones against this script's directory.
+ICON_TMP="$(mktemp -d)"
+xcrun actool "$PWD/Support/LittleSend.icon" \
+    --compile "$PWD/$APP/Contents/Resources" \
+    --app-icon LittleSend \
+    --platform macosx --target-device mac \
+    --minimum-deployment-target 14.0 \
+    --output-partial-info-plist "$ICON_TMP/partial.plist" \
+    --errors --warnings >/dev/null
+rm -rf "$ICON_TMP"
+echo "Compiled app icon"
+
 # Ad-hoc signature: enough for a personal build, and it gives the app a stable
 # identity so the Keychain stops re-prompting on every launch.
 codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 \

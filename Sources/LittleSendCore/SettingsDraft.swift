@@ -10,7 +10,6 @@ public struct SettingsDraft: Equatable, Sendable {
     public var smtpPort: Int
     public var smtpUsername: String
     public var smtpPassword: String
-    public var instaparserAPIKey: String
     public var embedImages: Bool
     public var limitImageSize: Bool
     /// Target ceiling per embedded image, in kilobytes.
@@ -23,6 +22,8 @@ public struct SettingsDraft: Equatable, Sendable {
     public var sendToKindle: Bool
     public var sendToEmail: Bool
     public var saveToDesktop: Bool
+    /// The format the Desktop copy is saved in, chosen from the Desktop chip.
+    public var desktopFormat: DesktopFormat
     /// The address book: every email address that can be picked as a
     /// recipient. Order is preserved (first added, first shown).
     public var emailAddresses: [String]
@@ -40,6 +41,12 @@ public struct SettingsDraft: Equatable, Sendable {
     public var coverLayout: CoverLayout
     public var coverSize: CoverSize
     public var optimizeCoverForEInk: Bool
+    /// A sound when a send finishes.
+    public var playSounds: Bool
+    /// Where the URL field fills itself from when the panel opens.
+    public var browserSource: BrowserSource
+    /// Whether the app's icon appears in the Dock, the menu bar, or both.
+    public var iconPlacement: IconPlacement
 
     public init(
         kindleAddress: String = "",
@@ -48,13 +55,13 @@ public struct SettingsDraft: Equatable, Sendable {
         smtpPort: Int = 465,
         smtpUsername: String = "",
         smtpPassword: String = "",
-        instaparserAPIKey: String = "",
         embedImages: Bool = true,
         limitImageSize: Bool = true,
         maxImageKilobytes: Int = 600,
         sendToKindle: Bool = true,
         sendToEmail: Bool = true,
         saveToDesktop: Bool = false,
+        desktopFormat: DesktopFormat = .epub,
         emailAddresses: [String] = [],
         emailRecipientExclusions: Set<String> = [],
         attachBookToEmail: Bool = false,
@@ -62,7 +69,10 @@ public struct SettingsDraft: Equatable, Sendable {
         coverFontFamily: String = "",
         coverLayout: CoverLayout = .classic,
         coverSize: CoverSize = .standard,
-        optimizeCoverForEInk: Bool = true
+        optimizeCoverForEInk: Bool = true,
+        playSounds: Bool = true,
+        browserSource: BrowserSource = .off,
+        iconPlacement: IconPlacement = .both
     ) {
         self.kindleAddress = kindleAddress
         self.fromAddress = fromAddress
@@ -70,13 +80,13 @@ public struct SettingsDraft: Equatable, Sendable {
         self.smtpPort = smtpPort
         self.smtpUsername = smtpUsername
         self.smtpPassword = smtpPassword
-        self.instaparserAPIKey = instaparserAPIKey
         self.embedImages = embedImages
         self.limitImageSize = limitImageSize
         self.maxImageKilobytes = maxImageKilobytes
         self.sendToKindle = sendToKindle
         self.sendToEmail = sendToEmail
         self.saveToDesktop = saveToDesktop
+        self.desktopFormat = desktopFormat
         self.emailAddresses = emailAddresses
         self.emailRecipientExclusions = emailRecipientExclusions
         self.attachBookToEmail = attachBookToEmail
@@ -85,6 +95,9 @@ public struct SettingsDraft: Equatable, Sendable {
         self.coverLayout = coverLayout
         self.coverSize = coverSize
         self.optimizeCoverForEInk = optimizeCoverForEInk
+        self.playSounds = playSounds
+        self.browserSource = browserSource
+        self.iconPlacement = iconPlacement
     }
 
     public var coverStyle: CoverStyle {
@@ -195,7 +208,6 @@ public struct SettingsDraft: Equatable, Sendable {
         copy.fromAddress = Self.trim(fromAddress)
         copy.smtpHost = Self.trim(smtpHost)
         copy.smtpUsername = Self.trim(smtpUsername)
-        copy.instaparserAPIKey = Self.trim(instaparserAPIKey)
         copy.coverFontFamily = Self.trim(coverFontFamily)
         copy.smtpPassword = Self.normalizeAppPassword(smtpPassword)
 
@@ -227,8 +239,6 @@ public struct SettingsDraft: Equatable, Sendable {
         let draft = normalized
         var problems: [String] = []
 
-        if draft.instaparserAPIKey.isEmpty { problems.append("Instaparser API key is missing.") }
-
         if !draft.kindleAddress.isEmpty, !SendConfiguration.looksLikeEmail(draft.kindleAddress) {
             problems.append("Kindle address is malformed.")
         }
@@ -258,10 +268,10 @@ public struct SettingsDraft: Equatable, Sendable {
     public var configuration: SendConfiguration {
         let draft = normalized
         return SendConfiguration(
-            instaparserAPIKey: draft.instaparserAPIKey,
             sendToKindle: draft.sendToKindle,
             kindleAddress: draft.kindleAddress,
             saveToDesktop: draft.saveToDesktop,
+            desktopFormat: draft.desktopFormat,
             // Deselecting every recipient is what turns the destination off;
             // the pipeline needs no separate notion of an email on/off switch.
             // The master switch gates the whole destination; which of the

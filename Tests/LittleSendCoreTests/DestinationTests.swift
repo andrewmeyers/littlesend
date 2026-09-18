@@ -55,7 +55,6 @@ final class DestinationValidationTests: XCTestCase {
         recipients: [String] = []
     ) -> SendConfiguration {
         SendConfiguration(
-            instaparserAPIKey: "k",
             sendToKindle: kindle,
             kindleAddress: kindleAddress,
             emailRecipients: recipients,
@@ -365,7 +364,6 @@ final class DestinationToggleTests: XCTestCase {
             smtpPort: 465,
             smtpUsername: "me@gmail.com",
             smtpPassword: "pw",
-            instaparserAPIKey: "key",
             sendToKindle: kindle,
             sendToEmail: email,
             emailAddresses: SettingsDraft.parseRecipients(recipients),
@@ -724,7 +722,7 @@ final class InlineEmailImageTests: XCTestCase {
 
     func testImagesAreFetchedForEmailEvenWithoutAnEPUB() {
         var config = SendConfiguration(
-            instaparserAPIKey: "k", sendToKindle: false, kindleAddress: "",
+            sendToKindle: false, kindleAddress: "",
             emailRecipients: ["a@x.com"], fromAddress: "me@x.com",
             smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p"
         )
@@ -737,7 +735,7 @@ final class InlineEmailImageTests: XCTestCase {
 
     func testEmbedImagesOffSuppressesBothDestinations() {
         var config = SendConfiguration(
-            instaparserAPIKey: "k", kindleAddress: "k@kindle.com",
+            kindleAddress: "k@kindle.com",
             emailRecipients: ["a@x.com"], fromAddress: "me@x.com",
             smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p"
         )

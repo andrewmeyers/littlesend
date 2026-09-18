@@ -110,8 +110,7 @@ final class ImageResizerTests: XCTestCase {
     func testLimitIsCarriedIntoTheConfiguration() {
         var draft = SettingsDraft(
             kindleAddress: "k@kindle.com", fromAddress: "me@x.com",
-            smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p",
-            instaparserAPIKey: "key"
+            smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p"
         )
         draft.limitImageSize = true
         draft.maxImageKilobytes = 600
@@ -124,8 +123,7 @@ final class ImageResizerTests: XCTestCase {
     func testSwitchingTheLimitOffEmbedsOriginals() {
         var draft = SettingsDraft(
             kindleAddress: "k@kindle.com", fromAddress: "me@x.com",
-            smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p",
-            instaparserAPIKey: "key"
+            smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p"
         )
         draft.limitImageSize = false
         XCTAssertNil(draft.configuration.imageSizeLimitBytes)
@@ -134,8 +132,7 @@ final class ImageResizerTests: XCTestCase {
     func testZeroOrNegativeSizeIsClampedRatherThanDisablingImages() {
         var draft = SettingsDraft(
             kindleAddress: "k@kindle.com", fromAddress: "me@x.com",
-            smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p",
-            instaparserAPIKey: "key"
+            smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "p"
         )
         draft.limitImageSize = true
         draft.maxImageKilobytes = 0

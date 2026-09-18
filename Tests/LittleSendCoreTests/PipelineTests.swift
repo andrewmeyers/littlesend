@@ -2,80 +2,14 @@ import XCTest
 import ImageIO
 @testable import LittleSendCore
 
-final class InstaparserDecodingTests: XCTestCase {
-
-    private let requested = URL(string: "https://example.com/post")!
-
-    func testDecodesFullResponse() throws {
-        let json = """
-        {"url":"https://example.com/canonical","title":"The Title","site_name":"Example",
-         "author":"Jane Doe","description":"Sub","html":"<p>Body</p>","date":1700000000,
-         "words":420,"is_rtl":false}
-        """
-        let article = try InstaparserClient.decode(data: Data(json.utf8), requestedURL: requested)
-
-        XCTAssertEqual(article.url, "https://example.com/canonical")
-        XCTAssertEqual(article.title, "The Title")
-        XCTAssertEqual(article.author, "Jane Doe")
-        XCTAssertEqual(article.wordCount, 420)
-        XCTAssertEqual(article.publishedDate, Date(timeIntervalSince1970: 1_700_000_000))
-    }
-
-    func testNullAndEmptyFieldsBecomeNil() throws {
-        let json = """
-        {"title":"T","html":"<p>x</p>","author":null,"site_name":"","description":"   ","date":0}
-        """
-        let article = try InstaparserClient.decode(data: Data(json.utf8), requestedURL: requested)
-
-        XCTAssertNil(article.author)
-        XCTAssertNil(article.siteName)
-        XCTAssertNil(article.description)
-        XCTAssertNil(article.publishedDate)
-        XCTAssertEqual(article.url, requested.absoluteString, "falls back to the requested URL")
-    }
-
-    func testMissingTitleFallsBackToHost() throws {
-        let json = #"{"html":"<p>x</p>"}"#
-        let article = try InstaparserClient.decode(data: Data(json.utf8), requestedURL: requested)
-        XCTAssertEqual(article.title, "example.com")
-    }
-
-    func testTextOutputIsAcceptedWhenHTMLIsAbsent() throws {
-        let json = #"{"title":"T","text":"Plain body"}"#
-        let article = try InstaparserClient.decode(data: Data(json.utf8), requestedURL: requested)
-        XCTAssertEqual(article.html, "Plain body")
-    }
-
-    func testEmptyBodyIsRejected() {
-        let json = #"{"title":"T","html":"   "}"#
-        XCTAssertThrowsError(try InstaparserClient.decode(data: Data(json.utf8), requestedURL: requested))
-    }
-
-    func testMalformedJSONIsRejected() {
-        XCTAssertThrowsError(try InstaparserClient.decode(data: Data("not json".utf8), requestedURL: requested))
-    }
-
-    func testStatusMessagesAreActionable() {
-        XCTAssertTrue(InstaparserClient.describe(status: 401, body: Data()).contains("API key"))
-        XCTAssertTrue(InstaparserClient.describe(status: 409, body: Data()).contains("quota"))
-        XCTAssertTrue(InstaparserClient.describe(status: 412, body: Data()).contains("could not extract"))
-        XCTAssertTrue(InstaparserClient.describe(status: 429, body: Data()).contains("rate limit"))
-    }
-
-    func testServerDetailIsIncluded() {
-        let body = Data(#"{"error":"bad url"}"#.utf8)
-        XCTAssertTrue(InstaparserClient.describe(status: 400, body: body).contains("bad url"))
-    }
-}
-
 final class ConfigurationTests: XCTestCase {
 
     private func configuration(
-        key: String = "k", kindle: String = "me@kindle.com", from: String = "me@gmail.com",
+        kindle: String = "me@kindle.com", from: String = "me@gmail.com",
         host: String = "smtp.gmail.com", user: String = "me@gmail.com", password: String = "p"
     ) -> SendConfiguration {
         SendConfiguration(
-            instaparserAPIKey: key, kindleAddress: kindle, fromAddress: from,
+            kindleAddress: kindle, fromAddress: from,
             smtpHost: host, smtpPort: 465, smtpUsername: user, smtpPassword: password
         )
     }
@@ -85,7 +19,6 @@ final class ConfigurationTests: XCTestCase {
     }
 
     func testEachMissingFieldIsReported() {
-        XCTAssertTrue(configuration(key: "").validationProblems.contains { $0.contains("API key") })
         XCTAssertTrue(configuration(kindle: "not-an-email").validationProblems.contains { $0.contains("Kindle") })
         XCTAssertTrue(configuration(from: "").validationProblems.contains { $0.contains("Sender") })
         XCTAssertTrue(configuration(host: "").validationProblems.contains { $0.contains("SMTP server") })

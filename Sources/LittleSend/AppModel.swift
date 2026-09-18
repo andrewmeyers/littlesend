@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import UniformTypeIdentifiers
 import Combine
 import LittleSendCore
 
@@ -31,9 +32,20 @@ final class AppModel: ObservableObject {
     @Published var isSending = false
     @Published var stageDescription = ""
     @Published var banner: Banner?
-    /// Set when the hosted parser failed on a URL and the local reader has not
-    /// been tried for it yet — drives the "Try local reader" button.
-    @Published private(set) var localRetryURL: URL?
+    /// A file staged for sending. Attaching does not send: the Send button is
+    /// still the thing that commits, the same as it is for a URL.
+    @Published private(set) var attachedFile: URL?
+    /// Where the current or most recent send stands. The menu bar icon follows
+    /// this, which matters most when the panel is closed and it is the only
+    /// sign that a send happened at all.
+    @Published private(set) var activity: Activity = .idle
+    /// Bumped when the URL field should take focus — the panel is reused, so
+    /// `onAppear` fires once and cannot do it on every reopen.
+    @Published private(set) var focusRequest = 0
+
+    enum Activity: Equatable {
+        case idle, sending, succeeded, failed
+    }
     @Published private(set) var history: [HistoryEntry] = []
 
     struct Banner: Equatable {
@@ -53,6 +65,61 @@ final class AppModel: ObservableObject {
 
     /// Pulls a URL off the pasteboard when the field is empty, so the common
     /// path is "copy link, open menu, hit Send".
+    /// Fills the field when the panel opens: the front browser's tab if that is
+    /// switched on, and the clipboard otherwise or if the browser has nothing.
+    func prefill() {
+        // A staged file owns the input; filling the URL behind it would put two
+        // things in play at once.
+        guard attachedFile == nil else { return }
+        guard urlText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+
+        let source = preferences.browserSource
+        guard source != .off else {
+            prefillFromPasteboard()
+            return
+        }
+        fill(from: source, fallingBackToClipboard: true)
+    }
+
+    /// The explicit "read my browser" action. Works even when the setting is
+    /// off, because a click is exactly the moment a permission prompt belongs.
+    func grabFromBrowser() {
+        let source = preferences.browserSource
+        fill(from: source == .off ? .automatic : source, fallingBackToClipboard: false)
+    }
+
+    private func fill(from source: BrowserSource, fallingBackToClipboard: Bool) {
+        Task {
+            switch await BrowserURLReader.currentURL(from: source) {
+            case .found(let url):
+                attachedFile = nil
+                urlText = url.absoluteString
+                banner = nil
+            case .denied(let browser):
+                banner = Banner(
+                    kind: .warning,
+                    message: "LittleSend is not allowed to read \(browser). Allow it under "
+                        + "System Settings → Privacy & Security → Automation, or choose "
+                        + "“Clipboard only” in Settings."
+                )
+                if fallingBackToClipboard { prefillFromPasteboard() }
+            case .nothing:
+                if fallingBackToClipboard {
+                    prefillFromPasteboard()
+                } else {
+                    banner = Banner(
+                        kind: .warning,
+                        message: "No open browser tab with a web address."
+                    )
+                }
+            }
+        }
+    }
+
+    func requestFocus() {
+        focusRequest += 1
+    }
+
     func prefillFromPasteboard() {
         guard urlText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         guard let contents = NSPasteboard.general.string(forType: .string) else { return }
@@ -61,26 +128,104 @@ final class AppModel: ObservableObject {
         urlText = trimmed
     }
 
+    /// Whether there is anything to send — a staged file, or a URL typed in.
+    var canSend: Bool {
+        guard !isSending else { return false }
+        if attachedFile != nil { return true }
+        return !urlText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Stages a file. A staged file takes precedence over the URL field, which
+    /// the UI disables while one is attached so there is no question which of
+    /// the two Send will act on.
+    func attachFile(at fileURL: URL) {
+        guard !isSending else { return }
+        attachedFile = fileURL
+        // The two inputs are exclusive, so staging a file empties the field
+        // rather than leaving a URL sitting there looking like it still counts.
+        urlText = ""
+        banner = nil
+    }
+
+    func clearAttachedFile() {
+        attachedFile = nil
+    }
+
     func send() {
         guard !isSending else { return }
+
+        if let file = attachedFile {
+            sendFile(at: file)
+            return
+        }
 
         let raw = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = Self.normalizedURL(from: raw) else {
             banner = Banner(kind: .failure, message: "That does not look like a web address.")
             return
         }
-        start(url: url, using: .instaparser)
+        start(url: url)
     }
 
-    /// Re-runs the failed URL through the local reader. Manual by design: it
-    /// loads the page in a real web view, which is slow, so it happens only
-    /// when asked for.
-    func retryLocally() {
-        guard !isSending, let url = localRetryURL else { return }
-        start(url: url, using: .localReader)
+    /// Opens a file chooser and sends whatever is picked.
+    ///
+    /// Opened from the menu bar icon, the app may not be active, so it is
+    /// activated first or the panel opens behind everything.
+    func chooseFile() {
+        guard !isSending else { return }
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.prompt = "Send"
+        panel.message = "Choose a file to send to your Kindle"
+        panel.directoryURL = try? DesktopExporter.defaultFolder()
+        // Only what Kindle can actually take, so an unsupported file is not
+        // selectable rather than being refused after the fact.
+        panel.allowedContentTypes = FileAttachment.kindleExtensions
+            .compactMap { UTType(filenameExtension: $0) }
+
+        // The menu bar window dismisses the moment the app resigns key, and
+        // opening a panel does exactly that — so the panel cannot depend on the
+        // popover still being there. `runModal()` additionally blocks the main
+        // thread while that teardown runs, which is how the panel ended up not
+        // appearing; `begin` is modeless and survives it.
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in self?.attachFile(at: url) }
+        }
+        panel.orderFrontRegardless()
     }
 
-    private func start(url: URL, using parser: ArticleParserChoice) {
+    /// Sends a staged file as-is to Kindle — no parsing, no EPUB, no cover.
+    private func sendFile(at fileURL: URL) {
+        guard !isSending else { return }
+
+        isSending = true
+        banner = nil
+        activity = .sending
+        stageDescription = SendStage.readingFile.rawValue
+
+        let configuration = preferences.configuration
+        let displayName = fileURL.lastPathComponent
+        Task {
+            let sender = ArticleSender(configuration: configuration, archive: self.archive)
+            do {
+                let outcome = try await sender.send(file: fileURL) { stage in
+                    Task { @MainActor in self.stageDescription = stage.rawValue }
+                }
+                self.finish(success: outcome, url: fileURL)
+            } catch {
+                self.finish(
+                    failure: error, url: fileURL, title: displayName
+                )
+            }
+        }
+    }
+
+    private func start(url: URL) {
         let problems = preferences.configuration.validationProblems
         guard problems.isEmpty else {
             banner = Banner(kind: .failure, message: problems.joined(separator: " "))
@@ -89,19 +234,21 @@ final class AppModel: ObservableObject {
 
         isSending = true
         banner = nil
-        localRetryURL = nil
-        stageDescription = (parser == .localReader ? SendStage.parsingLocally : SendStage.parsing).rawValue
+        activity = .sending
+        stageDescription = SendStage.parsing.rawValue
 
         let configuration = preferences.configuration
         Task {
             let sender = ArticleSender(configuration: configuration, archive: self.archive)
             do {
-                let outcome = try await sender.send(url: url, using: parser) { stage in
+                let outcome = try await sender.send(url: url, onPage: { page in
+                    Task { @MainActor in self.stageDescription = "Reading page \(page)…" }
+                }) { stage in
                     Task { @MainActor in self.stageDescription = stage.rawValue }
                 }
                 self.finish(success: outcome, url: url)
             } catch {
-                self.finish(failure: error, url: url, parser: parser)
+                self.finish(failure: error, url: url)
             }
         }
     }
@@ -110,6 +257,7 @@ final class AppModel: ObservableObject {
         isSending = false
         stageDescription = ""
         urlText = ""
+        attachedFile = nil
 
         var notes: [String] = []
         notes.append(Self.destinationSummary(for: outcome))
@@ -121,6 +269,7 @@ final class AppModel: ObservableObject {
             if outcome.resizedImageCount > 0 { images += " (\(outcome.resizedImageCount) shrunk)" }
             notes.append(images)
         }
+        if outcome.pageCount > 1 { notes.append("\(outcome.pageCount) pages") }
         if outcome.usedTextFallback { notes.append("text-only fallback") }
 
         let partialFailures = outcome.failures
@@ -154,9 +303,20 @@ final class AppModel: ObservableObject {
         } else {
             banner = Banner(
                 kind: .success,
-                message: "Sent “\(outcome.title)” to \(Self.destinationSummary(for: outcome))."
+                message: SendCopy.success(
+                    title: outcome.title,
+                    destination: Self.destinationSummary(for: outcome),
+                    minutes: outcome.wordCount.map(ReadingTime.minutes(forWords:))
+                )
             )
         }
+
+        // A partial failure still got something through, but it is not the
+        // outcome that was asked for, so it gets the low sound and the icon's
+        // attention state rather than the chime.
+        let clean = partialFailures.isEmpty
+        activity = clean ? .succeeded : .failed
+        playSound(clean ? .success : .failure)
     }
 
     /// "your Kindle and 2 recipients", for the banner and the history row.
@@ -178,19 +338,17 @@ final class AppModel: ObservableObject {
         return parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
     }
 
-    private func finish(failure error: Error, url: URL, parser: ArticleParserChoice) {
+    private func finish(
+        failure error: Error, url: URL, title: String? = nil
+    ) {
         isSending = false
         stageDescription = ""
 
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
 
-        // Offer the local reader only when the hosted parser was the thing
-        // that failed. A delivery failure, or the local reader failing in
-        // turn, would not be helped by trying it (again).
-        localRetryURL = (parser == .instaparser && error is InstaparserError) ? url : nil
         history.insert(
             HistoryEntry(
-                title: url.host ?? url.absoluteString,
+                title: title ?? url.host ?? url.absoluteString,
                 url: url.absoluteString,
                 date: Date(),
                 state: .failed(message: message),
@@ -200,6 +358,25 @@ final class AppModel: ObservableObject {
         )
         history = Array(history.prefix(SendArchive.keepCount))
         banner = Banner(kind: .failure, message: message)
+        activity = .failed
+        playSound(.failure)
+    }
+
+    // MARK: - Feedback
+
+    private enum Chime { case success, failure }
+
+    /// Stock system sounds: Glass is the soft, bright one; Basso the low one
+    /// macOS already uses for "that didn't work". Nothing bundled, nothing new
+    /// to learn.
+    private func playSound(_ chime: Chime) {
+        guard preferences.playSounds else { return }
+        NSSound(named: chime == .success ? "Glass" : "Basso")?.play()
+    }
+
+    /// Called once the icon has shown a result for long enough.
+    func acknowledgeActivity() {
+        if activity != .sending { activity = .idle }
     }
 
     /// Accepts input with or without a scheme, rejecting anything that is not
