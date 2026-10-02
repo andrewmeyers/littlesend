@@ -37,9 +37,23 @@ public final class SMTPClient {
     private let queue = DispatchQueue(label: "com.littlesend.smtp")
     private var connection: NWConnection?
     private var buffer = Data()
+    /// How long to wait for any reply from the server. A server that accepts
+    /// the connection and then goes quiet would otherwise hold the send open
+    /// forever: nothing else ends a read that never completes.
+    private let replyTimeout: TimeInterval
+    /// The same, for the reply to the finished message, which the server only
+    /// sends once it has processed the whole thing. RFC 5321 §4.5.3.2.6
+    /// suggests 10 minutes.
+    private let messageAcceptanceTimeout: TimeInterval
 
-    public init(configuration: SMTPConfiguration) {
+    public init(
+        configuration: SMTPConfiguration,
+        replyTimeout: TimeInterval = 120,
+        messageAcceptanceTimeout: TimeInterval = 600
+    ) {
         self.configuration = configuration
+        self.replyTimeout = replyTimeout
+        self.messageAcceptanceTimeout = messageAcceptanceTimeout
     }
 
     public func send(envelopeFrom: String, recipients: [String], message: Data) async throws {
@@ -78,7 +92,9 @@ public final class SMTPClient {
         payload.append(contentsOf: Array("\r\n.\r\n".utf8))
         try await write(payload)
 
-        let accepted = try await readReply()
+        // The upload itself is not timed: on a slow uplink a large book can
+        // take minutes to leave while still making progress.
+        let accepted = try await readReply(timeout: messageAcceptanceTimeout)
         try expect(accepted, code: 250, step: "message body")
 
         _ = try? await command("QUIT")
@@ -212,10 +228,10 @@ public final class SMTPClient {
         }
     }
 
-    private func readReply() async throws -> Reply {
+    private func readReply(timeout: TimeInterval? = nil) async throws -> Reply {
         while true {
             if let reply = Self.parseReply(from: &buffer) { return reply }
-            let chunk = try await receive()
+            let chunk = try await receive(timeout: timeout ?? replyTimeout)
             guard !chunk.isEmpty else {
                 throw SMTPError(code: nil, message: "The server closed the connection unexpectedly.")
             }
@@ -223,12 +239,29 @@ public final class SMTPClient {
         }
     }
 
-    private func receive() async throws -> Data {
+    private func receive(timeout: TimeInterval) async throws -> Data {
         guard let connection else {
             throw SMTPError(code: nil, message: "The SMTP connection is not open.")
         }
+        let host = configuration.host
         return try await withCheckedThrowingContinuation { continuation in
+            // Whichever comes first — data or the deadline — resumes the
+            // continuation. The watchdog resumes it itself rather than relying
+            // on `cancel()` to complete the pending read.
+            let gate = ResumeGate()
+            let watchdog = DispatchWorkItem {
+                guard gate.claim() else { return }
+                connection.cancel()
+                continuation.resume(throwing: SMTPError(
+                    code: nil,
+                    message: "\(host) stopped responding: no reply in \(Int(timeout)) seconds."
+                ))
+            }
+            queue.asyncAfter(deadline: .now() + timeout, execute: watchdog)
+
             connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+                watchdog.cancel()
+                guard gate.claim() else { return }
                 if let error {
                     continuation.resume(throwing: SMTPError(code: nil, message: "Read failed: \(error.localizedDescription)"))
                 } else if let data, !data.isEmpty {

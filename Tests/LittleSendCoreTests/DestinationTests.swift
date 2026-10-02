@@ -296,6 +296,23 @@ final class EmailResponsiveRenderingTests: XCTestCase {
         XCTAssertTrue(html.contains("max-width:100%;height:auto"))
     }
 
+    func testEveryRelativeLinkIsAbsolutizedInOnePass() {
+        let xhtml = #"<a href="/a" title="x">1</a><a href="b?x=1&amp;y=2">2</a>"#
+            + ##"<a href="https://other.com/c">3</a><a href="#top">4</a><img src="../d.png" alt="/e"/>"##
+        let result = ArticleEmailRenderer.absolutizeURLs(
+            in: xhtml, relativeTo: URL(string: "https://example.com/post/")
+        )
+
+        XCTAssertTrue(result.contains(#"href="https://example.com/a""#))
+        XCTAssertTrue(result.contains(#"href="https://example.com/post/b?x=1&amp;y=2""#))
+        XCTAssertTrue(result.contains(#"href="https://other.com/c""#))
+        XCTAssertTrue(result.contains(##"href="#top""##))
+        XCTAssertTrue(result.contains(#"src="https://example.com/d.png""#))
+        // Only src and href carry addresses; other attributes are left alone.
+        XCTAssertTrue(result.contains(#"title="x""#))
+        XCTAssertTrue(result.contains(#"alt="/e""#))
+    }
+
     func testNoFixedWidthAttributesLeakThrough() {
         // A hard-coded width would defeat the responsive style.
         let html = render(#"<img src="https://e.com/a.jpg" width="1600" height="900">"#)
