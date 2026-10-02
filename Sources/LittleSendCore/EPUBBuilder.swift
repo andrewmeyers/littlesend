@@ -21,14 +21,18 @@ public enum EPUBBuilder {
         images: [EmbeddedImage] = [],
         cover: CoverGenerator.Cover? = nil,
         identifier: String? = nil,
-        modified: Date = Date()
+        modified: Date = Date(),
+        convertedHTML: String? = nil
     ) -> Result {
-        var bodyXHTML = HTMLToXHTML.convert(article.html)
-        bodyXHTML = rewriteImageReferences(in: bodyXHTML, using: images)
+        // `convertedHTML` lets a caller that already ran the converter (to find
+        // the images, say) skip running it again; it must be
+        // `HTMLToXHTML.convert(article.html)`.
+        let converted = convertedHTML ?? HTMLToXHTML.convert(article.html)
+        var bodyXHTML = rewriteImageReferences(in: converted, using: images)
 
         var usedFallback = false
         if !isWellFormed(fragment: bodyXHTML) {
-            bodyXHTML = textFallbackBody(for: article)
+            bodyXHTML = textFallbackBody(fromXHTML: converted)
             usedFallback = true
         }
 
@@ -176,7 +180,11 @@ public enum EPUBBuilder {
     }
 
     static func textFallbackBody(for article: ParsedArticle) -> String {
-        HTMLToXHTML.plainText(article.html)
+        textFallbackBody(fromXHTML: HTMLToXHTML.convert(article.html))
+    }
+
+    static func textFallbackBody(fromXHTML xhtml: String) -> String {
+        HTMLToXHTML.plainText(fromXHTML: xhtml)
             .components(separatedBy: "\n")
             .filter { !$0.isEmpty }
             .map { "<p>\(HTMLToXHTML.escapeText($0))</p>" }

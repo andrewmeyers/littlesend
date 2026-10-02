@@ -37,10 +37,14 @@ public enum ArticleEmailRenderer {
     ///   download degrades to the original behaviour rather than a broken image.
     public static func render(
         article: ParsedArticle,
-        inlineImages: [EmbeddedImage] = []
+        inlineImages: [EmbeddedImage] = [],
+        convertedHTML: String? = nil
     ) -> Rendered {
+        // As in `EPUBBuilder.build`: pass the converted markup to skip
+        // converting it again.
+        let converted = convertedHTML ?? HTMLToXHTML.convert(article.html)
         let base = URL(string: article.url)
-        var body = absolutizeURLs(in: HTMLToXHTML.convert(article.html), relativeTo: base)
+        var body = absolutizeURLs(in: converted, relativeTo: base)
         body = rewriteToContentIDs(in: body, using: inlineImages)
         body = applyInlineStyles(to: body)
 
@@ -107,7 +111,7 @@ public enum ArticleEmailRenderer {
         var plain = article.title + "\n"
         if !byline.isEmpty { plain += byline.joined(separator: " · ") + "\n" }
         plain += article.url + "\n\n"
-        plain += HTMLToXHTML.plainText(article.html)
+        plain += HTMLToXHTML.plainText(fromXHTML: converted)
         plain += "\n\n—\nSent by LittleSend."
 
         return Rendered(html: html, plainText: plain, subject: article.title)
