@@ -202,24 +202,44 @@ public enum ArticleEmailRenderer {
 
     /// Rewrites relative `src` and `href` values against the article URL, so
     /// images and links still resolve once the markup leaves its original page.
+    ///
+    /// One pass over the markup. Replacing each value across the whole string
+    /// instead rescanned the article once per link, which on a link-heavy
+    /// piece meant hundreds of full copies.
     static func absolutizeURLs(in xhtml: String, relativeTo base: URL?) -> String {
         guard let base else { return xhtml }
-        var result = xhtml
-        for attribute in ["src", "href"] {
-            for value in EPUBBuilder.attributeValues(named: attribute, in: xhtml) {
-                let decoded = EPUBBuilder.decodeXMLEntities(value)
-                guard !decoded.hasPrefix("http://"), !decoded.hasPrefix("https://"),
-                      !decoded.hasPrefix("data:"), !decoded.hasPrefix("mailto:"),
-                      !decoded.hasPrefix("#"), !decoded.isEmpty,
-                      let absolute = URL(string: decoded, relativeTo: base)?.absoluteURL
-                else { continue }
-                result = result.replacingOccurrences(
-                    of: "\(attribute)=\"\(value)\"",
-                    with: "\(attribute)=\"\(HTMLToXHTML.escapeAttribute(absolute.absoluteString))\""
-                )
-            }
+        var result = ""
+        result.reserveCapacity(xhtml.utf8.count)
+        var remainder = Substring(xhtml)
+
+        while let equals = remainder.range(of: "=\"") {
+            let name = remainder[..<equals.lowerBound]
+            result += remainder[..<equals.upperBound]
+            remainder = remainder[equals.upperBound...]
+
+            // Only these two carry addresses. Any other attribute's value is
+            // left to be scanned as ordinary text, exactly as before.
+            guard name.hasSuffix("src") || name.hasSuffix("href"),
+                  let close = remainder.firstIndex(of: "\"")
+            else { continue }
+
+            result += absolutized(String(remainder[..<close]), against: base)
+            remainder = remainder[close...]
         }
+        result += remainder
         return result
+    }
+
+    /// One attribute value made absolute, or returned untouched when it already
+    /// is, is not a path at all, or cannot be resolved.
+    private static func absolutized(_ value: String, against base: URL) -> String {
+        let decoded = EPUBBuilder.decodeXMLEntities(value)
+        guard !decoded.hasPrefix("http://"), !decoded.hasPrefix("https://"),
+              !decoded.hasPrefix("data:"), !decoded.hasPrefix("mailto:"),
+              !decoded.hasPrefix("#"), !decoded.isEmpty,
+              let absolute = URL(string: decoded, relativeTo: base)?.absoluteURL
+        else { return value }
+        return HTMLToXHTML.escapeAttribute(absolute.absoluteString)
     }
 
     private static let dateFormatter: DateFormatter = {
