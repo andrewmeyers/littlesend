@@ -261,10 +261,14 @@ public struct ArticleSender {
         var cover: CoverGenerator.Cover?
         var images: [EmbeddedImage] = []
 
+        // Converted once and handed to everything below. The converter walks
+        // the article character by character, and the books, the email and
+        // the image list would otherwise each repeat that on the same input.
+        let xhtml = HTMLToXHTML.convert(article.html)
+
         // Downloaded once and shared: the EPUB stores them as files, the email
         // carries the same bytes inline.
         if configuration.needsImages {
-            let xhtml = HTMLToXHTML.convert(article.html)
             let imageURLs = EPUBBuilder.imageURLs(inXHTML: xhtml, relativeTo: URL(string: article.url))
             if !imageURLs.isEmpty {
                 progress(.fetchingImages)
@@ -292,7 +296,7 @@ public struct ArticleSender {
                     size: configuration.coverStyle.size,
                     optimizeForEInk: eInk
                 )
-                return (EPUBBuilder.build(article: article, images: images, cover: art), art)
+                return (EPUBBuilder.build(article: article, images: images, cover: art, convertedHTML: xhtml), art)
             }
 
             let wantsEInk = configuration.coverStyle.optimizeForEInk && configuration.sendToKindle
@@ -318,30 +322,42 @@ public struct ArticleSender {
         }
 
         progress(.sending)
-        var deliveries: [DeliveryResult] = []
 
-        if configuration.sendToKindle, let kindleBook = eInkBook ?? colorBook {
-            deliveries.append(await deliverToKindle(article: article, book: kindleBook))
-        }
-        if configuration.saveToDesktop {
-            deliveries.append(await saveDesktopCopy(article: article, book: colorBook ?? eInkBook))
-        }
-        var emailHTML: String?
-        if !configuration.emailRecipients.isEmpty {
-            let rendered = ArticleEmailRenderer.render(
+        // Captured by the concurrent work below, which may not share a `var`.
+        let sharedImages = images
+        let rendered: ArticleEmailRenderer.Rendered? = configuration.emailRecipients.isEmpty
+            ? nil
+            : ArticleEmailRenderer.render(
                 article: article,
-                inlineImages: configuration.embedImagesInEmail ? images : []
+                inlineImages: configuration.embedImagesInEmail ? sharedImages : [],
+                convertedHTML: xhtml
             )
-            emailHTML = rendered.html
-            deliveries.append(
-                await deliverToEmail(
-                    // Email lands on a phone or laptop screen, so it gets the
-                    // colour book for the same reason the Desktop copy does.
-                    article: article, book: colorBook ?? eInkBook,
-                    images: images, rendered: rendered
-                )
-            )
-        }
+        let emailHTML = rendered?.html
+
+        // The destinations share nothing, so they run side by side: each mail
+        // destination is its own SMTP session uploading its own copy, and a PDF
+        // Desktop copy downloads images of its own. Done one after another, the
+        // send took as long as all of them added together.
+        let kindleBook = configuration.sendToKindle ? eInkBook ?? colorBook : nil
+        // Email lands on a phone or laptop screen, so it gets the colour book
+        // for the same reason the Desktop copy does.
+        let screenBook = colorBook ?? eInkBook
+
+        async let kindleDelivery = { () async -> DeliveryResult? in
+            guard let kindleBook else { return nil }
+            return await deliverToKindle(article: article, book: kindleBook)
+        }()
+        async let desktopDelivery = { () async -> DeliveryResult? in
+            guard configuration.saveToDesktop else { return nil }
+            return await saveDesktopCopy(article: article, book: screenBook, convertedHTML: xhtml)
+        }()
+        async let emailDelivery = { () async -> DeliveryResult? in
+            guard let rendered else { return nil }
+            return await deliverToEmail(article: article, book: screenBook, images: sharedImages, rendered: rendered)
+        }()
+
+        // Reported in a fixed order, whichever finishes first.
+        let deliveries = [await kindleDelivery, await desktopDelivery, await emailDelivery].compactMap { $0 }
 
         // Saved even when delivery failed, so a rejected send still leaves the
         // EPUB behind to send by hand.
@@ -373,10 +389,12 @@ public struct ArticleSender {
 
     // MARK: - Destinations
 
-    /// Writes the EPUB where the user can see it. Unlike the mail
-    /// destinations there is no network involved, so this is synchronous.
     /// The Desktop copy, in whichever format was chosen for it.
-    private func saveDesktopCopy(article: ParsedArticle, book: EPUBBuilder.Result?) async -> DeliveryResult {
+    private func saveDesktopCopy(
+        article: ParsedArticle,
+        book: EPUBBuilder.Result?,
+        convertedHTML: String
+    ) async -> DeliveryResult {
         let format = configuration.desktopFormat
         let data: Data
         do {
@@ -391,7 +409,7 @@ public struct ArticleSender {
                 // cut to a byte budget, and a printed page needs pixels. The
                 // renderer brings them down to 300 dpi itself.
                 let urls = EPUBBuilder.imageURLs(
-                    inXHTML: HTMLToXHTML.convert(article.html),
+                    inXHTML: convertedHTML,
                     relativeTo: URL(string: article.url)
                 )
                 let originals = await ImageFetcher(

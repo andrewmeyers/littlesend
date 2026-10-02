@@ -317,28 +317,39 @@ public enum HTMLToXHTML {
             while index < source.count, source[index].isWhitespace { index += 1 }
         }
 
+        /// Called once per character while skipping comments, so it walks the
+        /// pattern in place rather than allocating an array of it each time.
         func matches(_ string: String) -> Bool {
-            let characters = Array(string)
-            guard index + characters.count <= source.count else { return false }
-            for (offset, character) in characters.enumerated()
-            where source[index + offset] != character {
-                return false
+            var cursor = index
+            for character in string {
+                guard cursor < source.count, source[cursor] == character else { return false }
+                cursor += 1
             }
             return true
         }
 
+        /// `name` is already lowercase, so only the source side needs folding.
         func matchesTag(_ name: String, closing: Bool) -> Bool {
-            let prefix = closing ? "</\(name)" : "<\(name)"
-            let characters = Array(prefix)
-            guard index + characters.count <= source.count else { return false }
-            for (offset, character) in characters.enumerated()
-            where Character(String(source[index + offset]).lowercased()) != character {
-                return false
+            guard index < source.count, source[index] == "<" else { return false }
+            var cursor = index + 1
+            if closing {
+                guard cursor < source.count, source[cursor] == "/" else { return false }
+                cursor += 1
+            }
+            for character in name {
+                guard cursor < source.count else { return false }
+                let candidate = source[cursor]
+                // ASCII-only names: skip the String round trip `lowercased()`
+                // would cost on every character of a skipped element.
+                guard candidate == character
+                        || (candidate.isASCII && candidate.isUppercase
+                            && Character(candidate.lowercased()) == character)
+                else { return false }
+                cursor += 1
             }
             // Ensure the tag name ended rather than matching a longer name.
-            let next = index + characters.count
-            guard next < source.count else { return true }
-            let following = source[next]
+            guard cursor < source.count else { return true }
+            let following = source[cursor]
             return following.isWhitespace || following == ">" || following == "/"
         }
     }
@@ -448,7 +459,13 @@ public enum HTMLToXHTML {
     /// Strips all markup, used for the plain-text fallback and for the
     /// plain-text alternative of the HTML email.
     public static func plainText(_ html: String) -> String {
-        let characters = Array(convert(html))
+        plainText(fromXHTML: convert(html))
+    }
+
+    /// `plainText(_:)` for markup that has already been through `convert`,
+    /// so a caller holding the XHTML does not pay for a second conversion.
+    static func plainText(fromXHTML xhtml: String) -> String {
+        let characters = Array(xhtml)
         var text = ""
         var index = 0
 
