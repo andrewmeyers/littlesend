@@ -9,6 +9,56 @@ struct SettingsView: View {
     @State private var status: Status?
     @State private var selectedAddress: String?
     @State private var newAddressText = ""
+    /// The pane last looked at, so Settings reopens where it was left.
+    @AppStorage("settingsPane") private var lastPane = Pane.general.rawValue
+
+    /// The sidebar's panes, System Settings style: a coloured icon for each.
+    private enum Pane: String, CaseIterable, Identifiable {
+        case general, destinations, account, reading, cover, images
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .general: return "General"
+            case .destinations: return "Destinations"
+            case .account: return "Mail Account"
+            case .reading: return "Reading"
+            case .cover: return "Cover"
+            case .images: return "Images"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: return "gearshape.fill"
+            case .destinations: return "paperplane.fill"
+            case .account: return "envelope.fill"
+            case .reading: return "doc.text.fill"
+            case .cover: return "book.closed.fill"
+            case .images: return "photo.fill"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .general: return .gray
+            case .destinations: return .blue
+            case .account: return .teal
+            case .reading: return .orange
+            case .cover: return .purple
+            case .images: return .green
+            }
+        }
+    }
+
+    private var pane: Binding<Pane?> {
+        Binding(
+            get: { Pane(rawValue: lastPane) ?? .general },
+            // Clicking empty sidebar space deselects; keep the pane instead.
+            set: { if let pane = $0 { lastPane = pane.rawValue } }
+        )
+    }
 
     private enum Status: Equatable {
         case saved
@@ -34,28 +84,32 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Four tabs rather than one long scroll. The form had grown to
-            // seven sections spanning addresses, mail credentials, cover art
-            // and image limits — unrelated things that only shared a window.
-            TabView {
-                destinationsTab
-                    .tabItem { Label("Destinations", systemImage: "paperplane") }
-                accountTab
-                    .tabItem { Label("Account", systemImage: "person.crop.circle") }
-                coverTab
-                    .tabItem { Label("Cover", systemImage: "book.closed") }
-                generalTab
-                    .tabItem { Label("General", systemImage: "gearshape") }
+        // A sidebar of panes, as System Settings does it. Each pane holds one
+        // kind of thing; the old General tab had grown to six unrelated ones.
+        NavigationSplitView {
+            List(Pane.allCases, selection: pane) { pane in
+                Label {
+                    Text(pane.title)
+                } icon: {
+                    PaneIcon(symbol: pane.symbol, tint: pane.tint)
+                }
             }
-            .frame(maxHeight: .infinity)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            let current = pane.wrappedValue ?? .general
+            VStack(spacing: 0) {
+                content(for: current)
+                    .frame(maxHeight: .infinity)
 
-            // Save and Revert stay outside the tabs: the draft is one value, so
-            // an edit on any tab is part of the same unsaved change.
-            Divider()
-            footer
+                // Save and Revert sit under every pane: the draft is one
+                // value, so an edit anywhere is part of the same change.
+                Divider()
+                footer
+            }
+            .navigationTitle(current.title)
         }
-        .frame(width: 600, height: 650)
+        .frame(width: 800, height: 640)
         .onAppear { revert() }
         // Clear a stale "Saved" note as soon as the user edits again.
         .onChange(of: draft) { _, _ in
@@ -63,9 +117,21 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private func content(for pane: Pane) -> some View {
+        switch pane {
+        case .general: generalPane
+        case .destinations: destinationsPane
+        case .account: accountPane
+        case .reading: readingPane
+        case .cover: coverPane
+        case .images: imagesPane
+        }
+    }
+
     // MARK: - Where things go
 
-    private var destinationsTab: some View {
+    private var destinationsPane: some View {
         Form {
             Section("Kindle") {
                 TextField("Send to Kindle address", text: $draft.kindleAddress)
@@ -122,7 +188,7 @@ struct SettingsView: View {
 
     // MARK: - Credentials
 
-    private var accountTab: some View {
+    private var accountPane: some View {
         Form {
             Section("Sender") {
                 TextField("From address", text: $draft.fromAddress)
@@ -132,7 +198,7 @@ struct SettingsView: View {
             }
 
             Section("Outgoing mail") {
-                TextField("SMTP server", text: $draft.smtpHost)
+                TextField("Mail server", text: $draft.smtpHost)
                 TextField("Port", value: $draft.smtpPort, format: .number.grouping(.never))
                 TextField("Username", text: $draft.smtpUsername)
                 SecureField("Password", text: $draft.smtpPassword)
@@ -155,7 +221,7 @@ struct SettingsView: View {
 
     // MARK: - Cover art
 
-    private var coverTab: some View {
+    private var coverPane: some View {
         Form {
             Section("Layout") {
                 CoverLayoutGallery(
@@ -213,7 +279,7 @@ struct SettingsView: View {
 
     // MARK: - Everything else
 
-    private var generalTab: some View {
+    private var readingPane: some View {
         Form {
             Section("Reading articles") {
                 Picker("Read articles with", selection: $draft.articleReader) {
@@ -249,7 +315,12 @@ struct SettingsView: View {
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+    }
 
+    private var generalPane: some View {
+        Form {
             Section("App icon") {
                 Picker("Show LittleSend in", selection: $draft.iconPlacement) {
                     ForEach(IconPlacement.allCases, id: \.self) { placement in
@@ -281,7 +352,12 @@ struct SettingsView: View {
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+    }
 
+    private var imagesPane: some View {
+        Form {
             Section("Images") {
                 Toggle("Include images in the EPUB", isOn: $draft.embedImages)
 
@@ -295,6 +371,9 @@ struct SettingsView: View {
                             value: $draft.maxImageKilobytes,
                             format: .number.grouping(.never)
                         )
+                        // The row's own label says what this is; without this
+                        // the grouped form prints the field's name, "size", too.
+                        .labelsHidden()
                         .frame(width: 70)
                         .multilineTextAlignment(.trailing)
                         Text("KB")
@@ -401,5 +480,23 @@ struct SettingsView: View {
         draft = preferences.draft
         status = nil
         selectedAddress = nil
+    }
+}
+
+/// A sidebar icon in the System Settings style: a white symbol on a small
+/// coloured rounded square.
+private struct PaneIcon: View {
+    let symbol: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 20, height: 20)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(tint.gradient)
+            )
     }
 }
