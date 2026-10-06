@@ -87,22 +87,22 @@ public struct SendConfiguration: Sendable {
     public var validationProblems: [String] {
         var problems: [String] = []
         if !sendToKindle, !saveToDesktop, emailRecipients.isEmpty {
-            problems.append("No destination is selected — pick one in the menu bar.")
+            problems.append("Pick where to send it.")
         }
         if sendToKindle, !Self.looksLikeEmail(kindleAddress) {
-            problems.append("Kindle address is missing or malformed.")
+            problems.append("Kindle address is missing or not valid.")
         }
         for recipient in emailRecipients where !Self.looksLikeEmail(recipient) {
-            problems.append("Email recipient “\(recipient)” is malformed.")
+            problems.append("“\(recipient)” isn't a valid email address.")
         }
 
         // Saving to the Desktop never opens a connection, so mail credentials
         // are only required when something is actually being mailed.
         if sendToKindle || !emailRecipients.isEmpty {
-            if !Self.looksLikeEmail(fromAddress) { problems.append("Sender address is missing or malformed.") }
-            if smtpHost.isEmpty { problems.append("SMTP server is missing.") }
-            if smtpUsername.isEmpty { problems.append("SMTP username is missing.") }
-            if smtpPassword.isEmpty { problems.append("SMTP password is missing.") }
+            if !Self.looksLikeEmail(fromAddress) { problems.append("Sender address is missing or not valid.") }
+            if smtpHost.isEmpty { problems.append("Mail server is missing.") }
+            if smtpUsername.isEmpty { problems.append("Mail username is missing.") }
+            if smtpPassword.isEmpty { problems.append("Mail password is missing.") }
         }
         return problems
     }
@@ -201,7 +201,7 @@ public struct ArticleSender {
             throw FileAttachment.Failure.kindleNotSelected
         }
         guard SendConfiguration.looksLikeEmail(configuration.kindleAddress) else {
-            throw SMTPError(code: nil, message: "Kindle address is missing or malformed.")
+            throw SMTPError(code: nil, message: "Kindle address is missing or not valid.")
         }
 
         progress(.readingFile)

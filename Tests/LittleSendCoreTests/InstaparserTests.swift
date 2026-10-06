@@ -56,9 +56,9 @@ final class InstaparserDecodingTests: XCTestCase {
 
     func testStatusMessagesAreActionable() {
         XCTAssertTrue(InstaparserClient.describe(status: 401, body: Data()).contains("API key"))
-        XCTAssertTrue(InstaparserClient.describe(status: 409, body: Data()).contains("quota"))
-        XCTAssertTrue(InstaparserClient.describe(status: 412, body: Data()).contains("could not extract"))
-        XCTAssertTrue(InstaparserClient.describe(status: 429, body: Data()).contains("rate limit"))
+        XCTAssertTrue(InstaparserClient.describe(status: 409, body: Data()).contains("this month"))
+        XCTAssertTrue(InstaparserClient.describe(status: 412, body: Data()).contains("couldn't read that page"))
+        XCTAssertTrue(InstaparserClient.describe(status: 429, body: Data()).contains("Too many requests"))
     }
 
     func testServerDetailIsIncluded() {

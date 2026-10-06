@@ -23,7 +23,7 @@
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>LittleSend reads the address of your front browser tab so it can fill the URL field for you.</string>
+    <string>LittleSend reads the link in your browser so you don't have to paste it.</string>
     <key>NSHumanReadableCopyright</key>
     <string></string>
 </dict>

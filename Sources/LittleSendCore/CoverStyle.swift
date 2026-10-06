@@ -24,9 +24,9 @@ public enum CoverLayout: String, CaseIterable, Codable, Sendable {
     public var summary: String {
         switch self {
         case .classic: return "Title low and left, source above it."
-        case .centered: return "Everything centred on the page."
-        case .banded: return "Title reversed out of a colour band."
-        case .minimal: return "Title alone, nothing else."
+        case .centered: return "Everything centered."
+        case .banded: return "Title in a color band."
+        case .minimal: return "Just the title."
         }
     }
 }
@@ -72,11 +72,11 @@ public enum CoverSize: String, CaseIterable, Codable, Sendable {
     public var summary: String {
         switch self {
         case .compact:
-            return "Roughly a third the file size. Matches the basic Kindle and Paperwhite closely."
+            return "About a third the file size. Fits the basic Kindle and Paperwhite."
         case .standard:
-            return "Amazon's recommended size, and sharp on every current Kindle including the Scribe."
+            return "Amazon's recommended size. Sharp on every Kindle, even the Scribe."
         case .large:
-            return "Headroom for higher-resolution screens, and for reading on an iPad or Mac."
+            return "Extra sharp, for big screens like an iPad or Mac."
         }
     }
 }

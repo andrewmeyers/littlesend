@@ -98,9 +98,8 @@ final class AppModel: ObservableObject {
             case .denied(let browser):
                 banner = Banner(
                     kind: .warning,
-                    message: "LittleSend is not allowed to read \(browser). Allow it under "
-                        + "System Settings → Privacy & Security → Automation, or choose "
-                        + "“Clipboard only” in Settings."
+                    message: "LittleSend can't read \(browser). Allow it in System Settings → "
+                        + "Privacy & Security → Automation."
                 )
                 if fallingBackToClipboard { prefillFromPasteboard() }
             case .nothing:
@@ -109,7 +108,7 @@ final class AppModel: ObservableObject {
                 } else {
                     banner = Banner(
                         kind: .warning,
-                        message: "No open browser tab with a web address."
+                        message: "No web page is open in your browser."
                     )
                 }
             }
@@ -161,7 +160,7 @@ final class AppModel: ObservableObject {
 
         let raw = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = Self.normalizedURL(from: raw) else {
-            banner = Banner(kind: .failure, message: "That does not look like a web address.")
+            banner = Banner(kind: .failure, message: "That isn't a web address.")
             return
         }
         start(url: url)
@@ -295,7 +294,7 @@ final class AppModel: ObservableObject {
             // Something did get through, so this is a warning, not an error.
             banner = Banner(
                 kind: .warning,
-                message: "\(failure.kind.rawValue) delivery failed: \(failure.errorMessage ?? "unknown error")"
+                message: "\(failure.kind.rawValue) failed: \(failure.errorMessage ?? "unknown error")"
             )
         } else if !warnings(for: outcome).isEmpty {
             // Delivered, but not quite as asked: worth saying out loud.

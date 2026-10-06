@@ -17,19 +17,19 @@ public struct FileAttachment: Sendable {
         public var errorDescription: String? {
             switch self {
             case .unreadable(let reason):
-                return "Could not read that file: \(reason)"
+                return "Couldn't read that file: \(reason)"
             case .empty:
                 return "That file is empty."
             case .tooLarge(let bytes, let limit):
                 let f = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
                 let l = ByteCountFormatter.string(fromByteCount: Int64(limit), countStyle: .file)
-                return "That file is \(f); the limit is about \(l) once encoded for mail."
+                return "That file is \(f). The limit is about \(l)."
             case .kindleNotSelected:
-                return "Turn on Kindle first — files are sent to Kindle only."
+                return "Turn on Kindle first. Files go to Kindle only."
             case .unsupportedByKindle(let ext):
                 let kind = ext.isEmpty ? "that kind of file" : ".\(ext) files"
-                return "Kindle does not accept \(kind). It takes EPUB, PDF, DOC, DOCX, "
-                    + "TXT, RTF, HTML and common image formats."
+                return "Kindle doesn't take \(kind). It takes EPUB, PDF, Word, TXT, RTF, "
+                    + "HTML and most images."
             }
         }
     }

@@ -48,7 +48,7 @@ final class FileAttachmentTests: XCTestCase {
                 return XCTFail("wrong error: \(error)")
             }
             XCTAssertTrue(
-                (error as? LocalizedError)?.errorDescription?.hasPrefix("Could not read") == true
+                (error as? LocalizedError)?.errorDescription?.hasPrefix("Couldn't read") == true
             )
         }
     }

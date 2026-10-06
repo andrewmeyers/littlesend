@@ -58,7 +58,7 @@ public final class SMTPClient {
 
     public func send(envelopeFrom: String, recipients: [String], message: Data) async throws {
         guard !recipients.isEmpty else {
-            throw SMTPError(code: nil, message: "No recipient address configured.")
+            throw SMTPError(code: nil, message: "There's no one to send it to.")
         }
 
         try await connect()
@@ -80,7 +80,7 @@ public final class SMTPClient {
             guard reply.code == 250 || reply.code == 251 else {
                 throw SMTPError(
                     code: reply.code,
-                    message: "The server rejected the recipient \(recipient): \(reply.text)"
+                    message: "The mail server refused \(recipient): \(reply.text)"
                 )
             }
         }
@@ -117,13 +117,13 @@ public final class SMTPClient {
         // LOGIN is the common fallback and is what most providers advertise.
         let start = try await command("AUTH LOGIN")
         guard start.code == 334 else {
-            throw SMTPError(code: start.code, message: "The server refused to start authentication: \(start.text)")
+            throw SMTPError(code: start.code, message: "The mail server wouldn't start sign-in: \(start.text)")
         }
         let user = try await command(
             Data(configuration.username.utf8).base64EncodedString(), redacted: "****"
         )
         guard user.code == 334 else {
-            throw SMTPError(code: user.code, message: "The server rejected the username: \(user.text)")
+            throw SMTPError(code: user.code, message: "The mail server didn't accept your username: \(user.text)")
         }
         let password = try await command(
             Data(configuration.password.utf8).base64EncodedString(), redacted: "****"
@@ -135,11 +135,11 @@ public final class SMTPClient {
         guard reply.code != 235 else { return }
         let hint: String
         if configuration.host.contains("gmail") {
-            hint = " Gmail requires a 16-character app password, not your account password."
+            hint = " Gmail needs a 16-letter app password, not your usual password."
         } else {
             hint = ""
         }
-        throw SMTPError(code: reply.code, message: "Sign-in to \(configuration.host) failed: \(reply.text).\(hint)")
+        throw SMTPError(code: reply.code, message: "Couldn't sign in to \(configuration.host): \(reply.text).\(hint)")
     }
 
     // MARK: - Protocol plumbing
@@ -152,12 +152,12 @@ public final class SMTPClient {
 
     private func expect(_ reply: Reply, code: Int, step: String) throws {
         guard reply.code != code else { return }
-        throw SMTPError(code: reply.code, message: "SMTP \(step) failed (\(reply.code)): \(reply.text)")
+        throw SMTPError(code: reply.code, message: "Mail server error at \(step) (\(reply.code)): \(reply.text)")
     }
 
     private func connect() async throws {
         guard let port = NWEndpoint.Port(rawValue: configuration.port) else {
-            throw SMTPError(code: nil, message: "Invalid SMTP port \(configuration.port).")
+            throw SMTPError(code: nil, message: "Port \(configuration.port) isn't valid.")
         }
 
         let options = NWProtocolTLS.Options()
@@ -181,12 +181,12 @@ public final class SMTPClient {
                     if gate.claim() {
                         continuation.resume(throwing: SMTPError(
                             code: nil,
-                            message: "Could not connect to \(self.configuration.host):\(self.configuration.port). \(error.localizedDescription)"
+                            message: "Couldn't connect to \(self.configuration.host):\(self.configuration.port). \(error.localizedDescription)"
                         ))
                     }
                 case .cancelled:
                     if gate.claim() {
-                        continuation.resume(throwing: SMTPError(code: nil, message: "The connection was cancelled."))
+                        continuation.resume(throwing: SMTPError(code: nil, message: "The connection was canceled."))
                     }
                 default:
                     break
@@ -215,7 +215,7 @@ public final class SMTPClient {
 
     private func write(_ bytes: Data) async throws {
         guard let connection else {
-            throw SMTPError(code: nil, message: "The SMTP connection is not open.")
+            throw SMTPError(code: nil, message: "The mail connection closed.")
         }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.send(content: bytes, completion: .contentProcessed { error in
@@ -233,7 +233,7 @@ public final class SMTPClient {
             if let reply = Self.parseReply(from: &buffer) { return reply }
             let chunk = try await receive(timeout: timeout ?? replyTimeout)
             guard !chunk.isEmpty else {
-                throw SMTPError(code: nil, message: "The server closed the connection unexpectedly.")
+                throw SMTPError(code: nil, message: "The mail server closed the connection.")
             }
             buffer.append(chunk)
         }
@@ -241,7 +241,7 @@ public final class SMTPClient {
 
     private func receive(timeout: TimeInterval) async throws -> Data {
         guard let connection else {
-            throw SMTPError(code: nil, message: "The SMTP connection is not open.")
+            throw SMTPError(code: nil, message: "The mail connection closed.")
         }
         let host = configuration.host
         return try await withCheckedThrowingContinuation { continuation in
@@ -254,7 +254,7 @@ public final class SMTPClient {
                 connection.cancel()
                 continuation.resume(throwing: SMTPError(
                     code: nil,
-                    message: "\(host) stopped responding: no reply in \(Int(timeout)) seconds."
+                    message: "\(host) stopped answering after \(Int(timeout)) seconds."
                 ))
             }
             queue.asyncAfter(deadline: .now() + timeout, execute: watchdog)
@@ -263,7 +263,7 @@ public final class SMTPClient {
                 watchdog.cancel()
                 guard gate.claim() else { return }
                 if let error {
-                    continuation.resume(throwing: SMTPError(code: nil, message: "Read failed: \(error.localizedDescription)"))
+                    continuation.resume(throwing: SMTPError(code: nil, message: "Couldn't read the server's reply: \(error.localizedDescription)"))
                 } else if let data, !data.isEmpty {
                     continuation.resume(returning: data)
                 } else if isComplete {
