@@ -37,6 +37,8 @@ final class Preferences: ObservableObject {
     @Published private(set) var playSounds: Bool
     @Published private(set) var browserSource: BrowserSource
     @Published private(set) var iconPlacement: IconPlacement
+    @Published private(set) var articleReader: ArticleReader
+    @Published private(set) var instaparserAPIKey: String
 
     private let defaults: UserDefaults
 
@@ -68,6 +70,8 @@ final class Preferences: ObservableObject {
         static let playSounds = "playSounds"
         static let browserSource = "browserSource"
         static let iconPlacement = "iconPlacement"
+        static let articleReader = "articleReader"
+        static let instaparserAPIKey = "instaparserAPIKey"
         static let smtpPassword = "smtpPassword"
     }
 
@@ -123,22 +127,26 @@ final class Preferences: ObservableObject {
             .flatMap(BrowserSource.init(rawValue:)) ?? .off
         iconPlacement = defaults.string(forKey: Keys.iconPlacement)
             .flatMap(IconPlacement.init(rawValue:)) ?? .both
+        articleReader = defaults.string(forKey: Keys.articleReader)
+            .flatMap(ArticleReader.init(rawValue:)) ?? .local
 
         var password = defaults.string(forKey: Keys.smtpPassword) ?? ""
 
-        // Earlier versions kept secrets in the Keychain. Drain it every launch,
-        // which also clears the retired Instaparser key if it is still there,
-        // and carry the password across if it has not been already.
+        var apiKey = defaults.string(forKey: Keys.instaparserAPIKey) ?? ""
+
+        // Earlier versions kept secrets in the Keychain. Drain it every launch
+        // and carry each secret across if it has not been already.
         let legacy = LegacyKeychain.drain()
         if password.isEmpty, let value = legacy[.smtpPassword] {
             password = value
             defaults.set(value, forKey: Keys.smtpPassword)
         }
+        if apiKey.isEmpty, let value = legacy[.instaparserAPIKey] {
+            apiKey = value
+            defaults.set(value, forKey: Keys.instaparserAPIKey)
+        }
         smtpPassword = password
-
-        // Instaparser is gone. Its API key was stored in plain text, so it is
-        // deleted outright rather than left sitting in the preferences file.
-        defaults.removeObject(forKey: "instaparserAPIKey")
+        instaparserAPIKey = apiKey
 
         // The default cover font changed from Possibility to the system font.
         // An existing install stores "" for "whatever the default is", so
@@ -185,7 +193,9 @@ final class Preferences: ObservableObject {
             optimizeCoverForEInk: optimizeCoverForEInk,
             playSounds: playSounds,
             browserSource: browserSource,
-            iconPlacement: iconPlacement
+            iconPlacement: iconPlacement,
+            articleReader: articleReader,
+            instaparserAPIKey: instaparserAPIKey
         )
     }
 
@@ -229,6 +239,8 @@ final class Preferences: ObservableObject {
         set(\.playSounds, draft.playSounds)
         set(\.browserSource, draft.browserSource)
         set(\.iconPlacement, draft.iconPlacement)
+        set(\.articleReader, draft.articleReader)
+        set(\.instaparserAPIKey, draft.instaparserAPIKey)
         set(\.smtpPassword, draft.smtpPassword)
 
         defaults.set(draft.kindleAddress, forKey: Keys.kindleAddress)
@@ -254,6 +266,8 @@ final class Preferences: ObservableObject {
         defaults.set(draft.playSounds, forKey: Keys.playSounds)
         defaults.set(draft.browserSource.rawValue, forKey: Keys.browserSource)
         defaults.set(draft.iconPlacement.rawValue, forKey: Keys.iconPlacement)
+        defaults.set(draft.articleReader.rawValue, forKey: Keys.articleReader)
+        defaults.set(draft.instaparserAPIKey, forKey: Keys.instaparserAPIKey)
         defaults.set(draft.smtpPassword, forKey: Keys.smtpPassword)
     }
 

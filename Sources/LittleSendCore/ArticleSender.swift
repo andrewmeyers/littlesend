@@ -25,6 +25,9 @@ public struct SendConfiguration: Sendable {
     public var imageSizeLimitBytes: Int?
     /// Font, layout and pixel size for the cover image.
     public var coverStyle: CoverStyle
+    /// Which reader turns the web page into an article.
+    public var articleReader: ArticleReader
+    public var instaparserAPIKey: String
 
     public init(
         sendToKindle: Bool = true,
@@ -42,7 +45,9 @@ public struct SendConfiguration: Sendable {
         smtpPassword: String,
         embedImages: Bool = true,
         imageSizeLimitBytes: Int? = 600 * 1024,
-        coverStyle: CoverStyle = .default
+        coverStyle: CoverStyle = .default,
+        articleReader: ArticleReader = .local,
+        instaparserAPIKey: String = ""
     ) {
         self.sendToKindle = sendToKindle
         self.kindleAddress = kindleAddress
@@ -60,6 +65,8 @@ public struct SendConfiguration: Sendable {
         self.embedImages = embedImages
         self.imageSizeLimitBytes = imageSizeLimitBytes
         self.coverStyle = coverStyle
+        self.articleReader = articleReader
+        self.instaparserAPIKey = instaparserAPIKey
     }
 
     /// True when an EPUB has to be produced at all.
@@ -147,6 +154,12 @@ public struct SendOutcome: Sendable {
     public let deliveries: [DeliveryResult]
     /// Folder holding this send's files, when archiving is on.
     public let archiveFolder: URL?
+    /// Why the built-in reader was used when Instaparser was chosen.
+    public var readerNote: String? = nil
+    /// Only a paywall's preview could be read, not the whole article.
+    public var isPreview = false
+    /// The publication's name, for saying whose paywall it was.
+    public var siteName: String? = nil
 
     public var failures: [DeliveryResult] { deliveries.filter { !$0.succeeded } }
     public var successes: [DeliveryResult] { deliveries.filter(\.succeeded) }
@@ -248,14 +261,25 @@ public struct ArticleSender {
             throw SMTPError(code: nil, message: problems.joined(separator: " "))
         }
 
-        // Read on this Mac, in a hidden WebKit view running Readability. No
-        // account, no API key, and no third party learns what is being read.
+        // Read on this Mac by default, in a hidden WebKit view running
+        // Readability: no account, and no third party learns what is being
+        // read. Instaparser is the optional faster route, and falls back here.
         progress(.parsing)
-        // Later pages report their number rather than a fixed stage: a long
-        // review can take a minute, and a count that climbs shows it has not hung.
-        let article = try await LocalArticleParser().parse(url: url) { page in
-            onPage(page)
-        }
+        let reading = try await ArticleReading.read(
+            url: url,
+            reader: configuration.articleReader,
+            instaparserAPIKey: configuration.instaparserAPIKey,
+            instaparser: { url, key in
+                try await InstaparserClient(apiKey: key, session: session).parse(url: url)
+            },
+            local: { url in
+                // Later pages report their number rather than a fixed stage: a
+                // long review can take a minute, and a count that climbs shows
+                // it has not hung.
+                try await LocalArticleParser().parse(url: url) { page in onPage(page) }
+            }
+        )
+        let article = reading.article
 
         var book: EPUBBuilder.Result?
         var cover: CoverGenerator.Cover?
@@ -383,7 +407,10 @@ public struct ArticleSender {
             wordCount: ReadingTime.wordCount(ofHTML: article.html),
             pageCount: article.pageCount,
             deliveries: deliveries,
-            archiveFolder: archiveFolder
+            archiveFolder: archiveFolder,
+            readerNote: reading.note,
+            isPreview: article.isPreview,
+            siteName: article.siteName
         )
     }
 

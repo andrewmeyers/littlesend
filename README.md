@@ -57,10 +57,26 @@ its spaces.
 
 ## How articles are read
 
-Every article is read on this Mac. The page is loaded in a hidden `WKWebView`
-and Mozilla's Readability is run against the live DOM. There is no hosted
-parser: no account, no API key, no quota, and no third party learns what you
-read. The cost is a few seconds per article while the page loads.
+By default every article is read on this Mac. The page is loaded in a hidden
+`WKWebView` and Mozilla's Readability is run against the live DOM: no account,
+no API key, no quota, and no third party learns what you read. The cost is a
+few seconds per article while the page loads.
+
+[Instaparser](https://www.instaparser.com) is an optional, much faster
+reader (Settings → General → Reading articles): typically 0.1–0.5 s against
+3–9 s for the built-in reader, and well under a second for a 16-page review
+the built-in reader takes 45 s to page through. It needs your own API key — the free
+plan covers 1,000 articles a month — and reads the page on Instaparser's
+servers. Some sites it cannot extract at all;
+those — and a missing or rejected key, a spent quota, or an outage — fall back
+to reading on this Mac, and the panel says why, so a send never fails just
+because Instaparser did.
+
+Paywalled sites show the built-in reader the same free preview they show any
+logged-out browser. LittleSend spots this (from the site's own
+`isAccessibleForFree` label) and says only part of the article came through,
+rather than sending a short book that looks complete. Subscribers can sign in
+once under Settings → General → Paywalls; the reader shares those sign-ins.
 
 Being an actual browser is what makes this reliable. Some sites refuse plain
 HTTP clients outright — `curl` of a gatesnotes.com article returns **403** with

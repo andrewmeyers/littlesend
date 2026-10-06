@@ -19,6 +19,7 @@ final class LiveSmokeTests: XCTestCase {
         let url = try XCTUnwrap(URL(string: target))
 
         let article = try await LocalArticleParser().parse(url: url)
+        print("LIVE: preview=\(article.isPreview) words=\(ReadingTime.wordCount(ofHTML: article.html))")
         XCTAssertFalse(article.title.isEmpty)
         XCTAssertFalse(article.html.isEmpty)
 

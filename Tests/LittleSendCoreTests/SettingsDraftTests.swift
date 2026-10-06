@@ -192,3 +192,46 @@ final class SettingsCompletenessTests: XCTestCase {
         XCTAssertTrue(bad.settingsProblems.contains { $0.contains("Sender") })
     }
 }
+
+final class ArticleReaderSettingsTests: XCTestCase {
+    func testBuiltInReaderIsTheDefault() {
+        XCTAssertEqual(SettingsDraft().articleReader, .local)
+        XCTAssertEqual(SettingsDraft().configuration.articleReader, .local)
+    }
+
+    /// Stored in UserDefaults by raw value.
+    func testRawValuesAreStable() {
+        XCTAssertEqual(ArticleReader.local.rawValue, "local")
+        XCTAssertEqual(ArticleReader.instaparser.rawValue, "instaparser")
+    }
+
+    func testReaderAndTrimmedKeyReachTheConfiguration() {
+        var draft = SettingsDraft()
+        draft.articleReader = .instaparser
+        draft.instaparserAPIKey = "  abc123\n"
+        XCTAssertEqual(draft.normalized.instaparserAPIKey, "abc123")
+        XCTAssertEqual(draft.configuration.articleReader, .instaparser)
+        XCTAssertEqual(draft.configuration.instaparserAPIKey, "abc123")
+    }
+
+    func testMissingKeyIsFlaggedOnlyWhenInstaparserIsChosen() {
+        var draft = SettingsDraft()
+        XCTAssertFalse(draft.settingsProblems.contains { $0.contains("Instaparser") })
+
+        draft.articleReader = .instaparser
+        XCTAssertTrue(draft.settingsProblems.contains("Instaparser API key is missing."))
+
+        draft.instaparserAPIKey = "key"
+        XCTAssertFalse(draft.settingsProblems.contains { $0.contains("Instaparser") })
+    }
+
+    /// A send with Instaparser chosen but no key still goes ahead — it falls
+    /// back to the built-in reader — so the send gate must not block it.
+    func testMissingKeyDoesNotBlockASend() {
+        var draft = SettingsDraft(kindleAddress: "me@kindle.com", fromAddress: "me@gmail.com",
+                                  smtpHost: "smtp.gmail.com", smtpUsername: "me@gmail.com",
+                                  smtpPassword: "p")
+        draft.articleReader = .instaparser
+        XCTAssertTrue(draft.validationProblems.isEmpty)
+    }
+}

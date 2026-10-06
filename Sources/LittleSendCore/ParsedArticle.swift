@@ -1,6 +1,7 @@
 import Foundation
 
-/// A readable article, extracted from a web page by `LocalArticleParser`.
+/// A readable article, extracted from a web page by `LocalArticleParser` or,
+/// when chosen, `InstaparserClient`.
 ///
 /// Everything downstream — the EPUB, the email, the Desktop copy — is built
 /// from this one value, so how the article was read never leaks further in.
@@ -17,6 +18,9 @@ public struct ParsedArticle: Sendable, Equatable {
     /// How many web pages the article was read from — more than 1 when it was
     /// paginated and the later pages were followed.
     public var pageCount: Int
+    /// The site showed only part of the article — a paywall's free preview —
+    /// so this is not the whole thing.
+    public var isPreview: Bool
 
     public init(
         url: String,
@@ -28,7 +32,8 @@ public struct ParsedArticle: Sendable, Equatable {
         publishedDate: Date? = nil,
         wordCount: Int? = nil,
         isRightToLeft: Bool = false,
-        pageCount: Int = 1
+        pageCount: Int = 1,
+        isPreview: Bool = false
     ) {
         self.url = url
         self.title = title
@@ -40,5 +45,6 @@ public struct ParsedArticle: Sendable, Equatable {
         self.wordCount = wordCount
         self.isRightToLeft = isRightToLeft
         self.pageCount = pageCount
+        self.isPreview = isPreview
     }
 }
