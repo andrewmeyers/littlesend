@@ -239,7 +239,8 @@ public final class LocalArticleParser: NSObject {
     ///
     /// Run with `callAsyncJavaScript`, so it is a function body: it `return`s
     /// its result and may `await`.
-    static let extractionScript = """
+    nonisolated static let extractionScript = previewTailTrimmer + """
+
       try {
         if (typeof Readability === "undefined") {
           return JSON.stringify({ ok: false, reason: "Readability did not load" });
@@ -333,7 +334,8 @@ public final class LocalArticleParser: NSObject {
           byline: article.byline || "",
           siteName: article.siteName || "",
           excerpt: article.excerpt || "",
-          content: article.content || "",
+          // A preview ends in the paywall's own pitch; that is not article.
+          content: preview ? trimPreviewTail(article.content || "") : (article.content || ""),
           publishedTime: article.publishedTime || "",
           url: location.href,
           relNext: relNext,
@@ -343,6 +345,43 @@ public final class LocalArticleParser: NSObject {
       } catch (error) {
         return JSON.stringify({ ok: false, reason: String(error) });
       }
+    """
+
+    /// Drops the paywall's pitch from the end of a preview — "Continue reading
+    /// with a subscription", "Subscribe Now", a newsletter form, a logo, a
+    /// copyright line — walking back from the end until a real paragraph.
+    ///
+    /// Only ever run on a preview: a whole article's closing lines are left
+    /// alone. A block counts as pitch if it is inside a form, is very short,
+    /// or is short and talks about subscribing, signing in or copyright.
+    nonisolated static let previewTailTrimmer = """
+    function trimPreviewTail(html) {
+      var holder = document.createElement("div");
+      holder.innerHTML = html;
+      var words = function (text) { return (text || "").split(/\\s+/).filter(Boolean).length; };
+      var pitch = /subscri|sign (in|up)|log ?in|continue reading|keep reading|read the full|already an? (member|subscriber)|all rights reserved|copyright|newsletter|daily digest/i;
+      var blocks = holder.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote, figure, form");
+      for (var i = blocks.length - 1; i >= 0; i--) {
+        var block = blocks[i];
+        var text = block.textContent || "";
+        var count = words(text);
+        var isPitch = block.closest("form") !== null || count < 4 || (count < 25 && pitch.test(text));
+        if (!isPitch) break;
+        block.remove();
+      }
+      // Containers the removed blocks leave empty go too.
+      var emptied = true;
+      while (emptied) {
+        emptied = false;
+        holder.querySelectorAll("div, section, aside, article, form").forEach(function (element) {
+          if (!element.textContent.trim() && !element.querySelector("img, picture, video, svg")) {
+            element.remove();
+            emptied = true;
+          }
+        });
+      }
+      return holder.innerHTML;
+    }
     """
 
     /// Maps Readability's output onto a `ParsedArticle`.

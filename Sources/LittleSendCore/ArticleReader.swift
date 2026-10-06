@@ -30,7 +30,15 @@ public enum ArticleReading {
         public let article: ParsedArticle
         /// Set when Instaparser was chosen but the built-in reader was used.
         public let note: String?
+        /// The fallback was caused by something the user can fix — no key, a
+        /// rejected key, a suspended account, a spent monthly allowance — and
+        /// so is worth a warning. Otherwise (a page Instaparser cannot read, a
+        /// brief rate limit, an outage) the note is for the history only.
+        public var needsAttention = false
     }
+
+    /// Instaparser statuses the user can act on in Settings or their account.
+    static let fixableStatuses: Set<Int> = [401, 403, 409]
 
     public static func read(
         url: URL,
@@ -47,7 +55,8 @@ public enum ArticleReading {
         guard !key.isEmpty else {
             return Result(
                 article: try await local(url),
-                note: "No Instaparser API key, so it was read on this Mac."
+                note: "No Instaparser API key, so it was read on this Mac.",
+                needsAttention: true
             )
         }
 
@@ -55,7 +64,12 @@ public enum ArticleReading {
             return Result(article: try await instaparser(url, key), note: nil)
         } catch {
             let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            return Result(article: try await local(url), note: "\(reason) Read on this Mac instead.")
+            let status = (error as? InstaparserError)?.statusCode
+            return Result(
+                article: try await local(url),
+                note: "\(reason) Read on this Mac instead.",
+                needsAttention: status.map(fixableStatuses.contains) ?? false
+            )
         }
     }
 }

@@ -156,6 +156,8 @@ public struct SendOutcome: Sendable {
     public let archiveFolder: URL?
     /// Why the built-in reader was used when Instaparser was chosen.
     public var readerNote: String? = nil
+    /// The reason is one the user can fix, so it deserves a warning.
+    public var readerNoteNeedsAttention = false
     /// Only a paywall's preview could be read, not the whole article.
     public var isPreview = false
     /// The publication's name, for saying whose paywall it was.
@@ -409,6 +411,7 @@ public struct ArticleSender {
             deliveries: deliveries,
             archiveFolder: archiveFolder,
             readerNote: reading.note,
+            readerNoteNeedsAttention: reading.needsAttention,
             isPreview: article.isPreview,
             siteName: article.siteName
         )
