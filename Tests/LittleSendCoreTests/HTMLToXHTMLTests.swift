@@ -126,6 +126,29 @@ final class HTMLToXHTMLTests: XCTestCase {
         XCTAssertFalse(text.contains("<"))
     }
 
+    func testMultiByteTextPassesThroughUnchanged() {
+        // The scanner works on UTF-8 bytes; none of this may be split or lost.
+        let text = "Café — naïve 東京 🇯🇵 e\u{301} שלום"
+        let output = HTMLToXHTML.convert("<p>\(text)</p>")
+        XCTAssertEqual(output, "<p>\(text)</p>")
+        assertWellFormed(output)
+    }
+
+    func testMultiByteAttributeValuesSurvive() {
+        let output = HTMLToXHTML.convert("<img src=\"/é.png\" alt='東京 & co'>")
+        XCTAssertEqual(output, "<img alt=\"東京 &amp; co\" src=\"/é.png\"/>")
+        assertWellFormed(output)
+    }
+
+    func testDiscardedElementEndsAtAnyCaseEndTag() {
+        let output = HTMLToXHTML.convert("<p>a</p><SCRIPT>x()</Script><p>b</p>")
+        XCTAssertEqual(output, "<p>a</p><p>b</p>")
+    }
+
+    func testUppercaseTagsAreLowercased() {
+        XCTAssertEqual(HTMLToXHTML.convert("<P>x</P>"), "<p>x</p>")
+    }
+
     func testDeeplyNestedInputIsCappedButKeepsContent() {
         let html = String(repeating: "<div>", count: 500) + "deep" + String(repeating: "</div>", count: 500)
         let output = HTMLToXHTML.convert(html)
@@ -167,6 +190,10 @@ final class PlainTextTests: XCTestCase {
 
     func testBlankLinesAreCollapsed() {
         XCTAssertEqual(HTMLToXHTML.plainText("<div><p>a</p></div><div></div><p>b</p>"), "a\nb")
+    }
+
+    func testMultiByteTextSurvives() {
+        XCTAssertEqual(HTMLToXHTML.plainText("<p>東京</p><p>café 🇯🇵</p>"), "東京\ncafé 🇯🇵")
     }
 
     func testScriptContentIsAbsent() {

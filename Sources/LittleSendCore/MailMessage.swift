@@ -119,7 +119,7 @@ public struct MailMessage {
         guard let htmlBody else {
             var block = "Content-Type: text/plain; charset=\"utf-8\"\r\n"
             block += "Content-Transfer-Encoding: base64\r\n\r\n"
-            block += Self.wrap(Data(plainTextBody.utf8).base64EncodedString())
+            block += Self.base64Lines(Data(plainTextBody.utf8))
             block += "\r\n"
             return block
         }
@@ -129,13 +129,13 @@ public struct MailMessage {
         block += "--\(alternativeBoundary)\r\n"
         block += "Content-Type: text/plain; charset=\"utf-8\"\r\n"
         block += "Content-Transfer-Encoding: base64\r\n\r\n"
-        block += Self.wrap(Data(plainTextBody.utf8).base64EncodedString())
+        block += Self.base64Lines(Data(plainTextBody.utf8))
         block += "\r\n"
 
         block += "--\(alternativeBoundary)\r\n"
         block += "Content-Type: text/html; charset=\"utf-8\"\r\n"
         block += "Content-Transfer-Encoding: base64\r\n\r\n"
-        block += Self.wrap(Data(htmlBody.utf8).base64EncodedString())
+        block += Self.base64Lines(Data(htmlBody.utf8))
         block += "\r\n"
 
         block += "--\(alternativeBoundary)--\r\n"
@@ -148,7 +148,7 @@ public struct MailMessage {
         block += "Content-Transfer-Encoding: base64\r\n"
         block += "Content-ID: <\(Self.stripLineBreaks(image.contentID))>\r\n"
         block += "Content-Disposition: inline; filename=\"\(name)\"\r\n\r\n"
-        block += Self.wrap(image.data.base64EncodedString())
+        block += Self.base64Lines(image.data)
         block += "\r\n"
         return block
     }
@@ -158,21 +158,20 @@ public struct MailMessage {
         var block = "Content-Type: \(attachment.mediaType); name=\"\(name)\"\r\n"
         block += "Content-Transfer-Encoding: base64\r\n"
         block += "Content-Disposition: attachment; filename=\"\(name)\"\r\n\r\n"
-        block += Self.wrap(attachment.data.base64EncodedString())
+        block += Self.base64Lines(attachment.data)
         block += "\r\n"
         return block
     }
 
     /// Base64 bodies must be wrapped to stay within the 998-octet line limit.
-    static func wrap(_ base64: String, width: Int = 76) -> String {
-        var lines: [String] = []
-        var index = base64.startIndex
-        while index < base64.endIndex {
-            let end = base64.index(index, offsetBy: width, limitedBy: base64.endIndex) ?? base64.endIndex
-            lines.append(String(base64[index..<end]))
-            index = end
-        }
-        return lines.joined(separator: "\r\n")
+    ///
+    /// Foundation wraps while it encodes. Splitting the encoded string
+    /// afterwards made one small String per 76 characters — hundreds of
+    /// thousands of them for an EPUB of a few megabytes.
+    static func base64Lines(_ data: Data) -> String {
+        data.base64EncodedString(options: [
+            .lineLength76Characters, .endLineWithCarriageReturn, .endLineWithLineFeed,
+        ])
     }
 
     /// The domain half of the sender's address, for the right-hand side of the
