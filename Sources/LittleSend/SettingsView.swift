@@ -9,8 +9,13 @@ struct SettingsView: View {
     @State private var status: Status?
     @State private var selectedAddress: String?
     @State private var newAddressText = ""
+    @State private var search = ""
     /// The pane last looked at, so Settings reopens where it was left.
     @AppStorage("settingsPane") private var lastPane = Pane.general.rawValue
+
+    private enum Status: Equatable {
+        case saved
+    }
 
     /// The sidebar's panes, System Settings style: a coloured icon for each.
     private enum Pane: String, CaseIterable, Identifiable {
@@ -50,7 +55,32 @@ struct SettingsView: View {
             case .images: return .green
             }
         }
+
+        /// Words a search should find this pane by, beyond its title.
+        var keywords: [String] {
+            switch self {
+            case .general: return ["dock", "menu bar", "icon", "browser", "link", "clipboard", "sound", "chime"]
+            case .destinations: return ["kindle", "email", "address", "recipient", "attach", "epub"]
+            case .account: return ["sender", "from", "mail server", "smtp", "port", "username", "password", "gmail"]
+            case .reading: return ["instaparser", "api key", "reader", "paywall", "sign in", "sign out", "subscription"]
+            case .cover: return ["layout", "font", "size", "e-ink", "gray", "grey"]
+            case .images: return ["image", "picture", "shrink", "size", "kb"]
+            }
+        }
+
+        func matches(_ query: String) -> Bool {
+            let query = query.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !query.isEmpty else { return true }
+            return title.lowercased().contains(query) || keywords.contains { $0.contains(query) }
+        }
     }
+
+    /// Sidebar groups, as headings over the panes.
+    private static let groups: [(title: String, panes: [Pane])] = [
+        ("General", [.general]),
+        ("Sending", [.destinations, .account]),
+        ("Articles", [.reading, .cover, .images]),
+    ]
 
     private var pane: Binding<Pane?> {
         Binding(
@@ -58,10 +88,6 @@ struct SettingsView: View {
             // Clicking empty sidebar space deselects; keep the pane instead.
             set: { if let pane = $0 { lastPane = pane.rawValue } }
         )
-    }
-
-    private enum Status: Equatable {
-        case saved
     }
 
     /// Enumerated once per window rather than on every redraw — there are a
@@ -87,34 +113,68 @@ struct SettingsView: View {
         // A sidebar of panes, as System Settings does it. Each pane holds one
         // kind of thing; the old General tab had grown to six unrelated ones.
         NavigationSplitView {
-            List(Pane.allCases, selection: pane) { pane in
-                Label {
-                    Text(pane.title)
-                } icon: {
-                    PaneIcon(symbol: pane.symbol, tint: pane.tint)
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
-            .toolbar(removing: .sidebarToggle)
+            sidebar
         } detail: {
             let current = pane.wrappedValue ?? .general
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                // The pane's name as a heading at the top left, where System
+                // Settings puts it.
+                Text(current.title)
+                    .font(.title2.weight(.semibold))
+                    .padding(.horizontal, 26)
+                    // Level with the window controls, as in System Settings.
+                    .padding(.top, 6)
+
                 content(for: current)
                     .frame(maxHeight: .infinity)
+                    // On the pane, which is always on screen; on the split
+                    // view itself it is never put in the window at all.
+                    .background(HiddenTitleBar())
 
                 // Save and Revert sit under every pane: the draft is one
                 // value, so an edit anywhere is part of the same change.
                 Divider()
                 footer
             }
+            // Still the window's title, for the Window menu; with the toolbar
+            // hidden it is not drawn over the pane as well.
             .navigationTitle(current.title)
         }
-        .frame(width: 800, height: 640)
+        // No toolbar: the sidebar runs to the top of the window with the
+        // window controls in it, and the pane starts right under the top edge.
+        .toolbar(.hidden, for: .windowToolbar)
+        .frame(width: 820, height: 680)
         .onAppear { revert() }
         // Clear a stale "Saved" note as soon as the user edits again.
         .onChange(of: draft) { _, _ in
             if status == .saved { status = nil }
         }
+    }
+
+    private var sidebar: some View {
+        List(selection: pane) {
+            ForEach(Self.groups, id: \.title) { group in
+                let panes = group.panes.filter { $0.matches(search) }
+                if !panes.isEmpty {
+                    Section(group.title) {
+                        ForEach(panes) { pane in
+                            Label {
+                                Text(pane.title)
+                            } icon: {
+                                PaneIcon(symbol: pane.symbol, tint: pane.tint)
+                            }
+                            .tag(pane)
+                        }
+                    }
+                }
+            }
+        }
+        .searchable(text: $search, placement: .sidebar, prompt: "Search Settings")
+        .environment(\.sidebarRowSize, .large)
+        // Room for "Mail Account" and the search prompt at full length.
+        .frame(minWidth: 220)
+        .navigationSplitViewColumnWidth(220)
+        .toolbar(removing: .sidebarToggle)
     }
 
     @ViewBuilder
@@ -129,18 +189,54 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - General
+
+    private var generalPane: some View {
+        Form {
+            Section {
+                Picker(selection: $draft.iconPlacement) {
+                    ForEach(IconPlacement.allCases, id: \.self) { placement in
+                        Text(placement.displayName).tag(placement)
+                    }
+                } label: {
+                    Text("Show LittleSend in")
+                    Text("Menu bar only keeps LittleSend out of the Dock and ⌘Tab, but its menus won't show.")
+                }
+
+                Picker(selection: $draft.browserSource) {
+                    ForEach(BrowserSource.allCases, id: \.self) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                } label: {
+                    Text("Fill the link from")
+                    Text("macOS asks once before LittleSend can read your browser. If no page is open, it uses the clipboard.")
+                }
+
+                Toggle(isOn: $draft.playSounds) {
+                    Text("Play sounds")
+                    Text("A chime when a send works, and a low tone if it fails.")
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
     // MARK: - Where things go
 
     private var destinationsPane: some View {
         Form {
             Section("Kindle") {
-                TextField("Send to Kindle address", text: $draft.kindleAddress)
-                Text("Find it on Amazon under Manage Your Content and Devices → Preferences → Personal Document Settings.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
+                LabeledContent {
+                    TextField("Send to Kindle address", text: $draft.kindleAddress)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("Send to Kindle address")
+                    Text("Find it on Amazon under Manage Your Content and Devices → Preferences → Personal Document Settings.")
+                }
             }
 
-            Section("Email addresses") {
+            Section {
                 emailAddressTable
 
                 HStack {
@@ -169,10 +265,10 @@ struct SettingsView: View {
                         .font(.appLabel)
                         .foregroundStyle(.orange)
                 }
-
-                Text("Your address book. Pick who gets each send in the panel.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Email addresses")
+            } footer: {
+                SectionNote("Your address book. Pick who gets each send in the panel.")
             }
 
             Section("Email messages") {
@@ -191,58 +287,124 @@ struct SettingsView: View {
     private var accountPane: some View {
         Form {
             Section("Sender") {
-                TextField("From address", text: $draft.fromAddress)
-                Text("Add this address to your Approved Personal Document E-mail List on Amazon. If you don't, Amazon drops your sends.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
+                LabeledContent {
+                    TextField("From address", text: $draft.fromAddress)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("From address")
+                    Text("Add this address to your Approved Personal Document E-mail List on Amazon. If you don't, Amazon drops your sends.")
+                }
             }
 
-            Section("Outgoing mail") {
+            Section {
                 TextField("Mail server", text: $draft.smtpHost)
                 TextField("Port", value: $draft.smtpPort, format: .number.grouping(.never))
                 TextField("Username", text: $draft.smtpUsername)
                 SecureField("Password", text: $draft.smtpPassword)
-                Text("For Gmail, turn on 2-Step Verification and use an app password. Use port 465.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Label(
-                    "Your mail password and Instaparser key are saved as plain text in LittleSend's settings, not in the Keychain.",
-                    systemImage: "info.circle"
-                )
-                .font(.appLabel)
-                .foregroundStyle(.secondary)
+            } header: {
+                Text("Outgoing mail")
+            } footer: {
+                SectionNote("For Gmail, turn on 2-Step Verification and use an app password. Use port 465. The password is saved as plain text in LittleSend's settings, not in the Keychain.")
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: - Reading
+
+    private var readingPane: some View {
+        Form {
+            Section {
+                Picker(selection: $draft.articleReader) {
+                    ForEach(ArticleReader.allCases, id: \.self) { reader in
+                        Text(reader.displayName).tag(reader)
+                    }
+                } label: {
+                    Text("Read articles with")
+                    Text(readerNote)
+                }
+
+                if draft.articleReader == .instaparser {
+                    LabeledContent {
+                        SecureField("Instaparser API key", text: $draft.instaparserAPIKey)
+                            .labelsHidden()
+                    } label: {
+                        Text("Instaparser API key")
+                        Text("Saved as plain text in LittleSend's settings.")
+                    }
+
+                    LabeledContent {
+                        Link("Get a free key", destination: URL(string: "https://www.instaparser.com")!)
+                    } label: {
+                        Text("No key yet?")
+                        Text("The free plan covers 1,000 articles a month.")
+                    }
+                }
+            }
+
+            Section("Paywalls") {
+                LabeledContent {
+                    Button("Sign In…") { SiteSignInWindow.shared.show() }
+                } label: {
+                    Text("Sign in to a site")
+                    Text("Pay for a site? Sign in once to get full articles. LittleSend can't use Safari's sign-ins.")
+                }
+
+                LabeledContent {
+                    Button("Sign Out") {
+                        Task {
+                            await SiteSignInWindow.signOutOfAllSites()
+                            signedOut = true
+                        }
+                    }
+                } label: {
+                    Text("Sign out of all sites")
+                    if signedOut {
+                        Text("Signed out of all sites.")
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var readerNote: String {
+        switch draft.articleReader {
+        case .local:
+            return "Reads articles on this Mac. It's free and private, and it reads every page of long articles."
+        case .instaparser:
+            return "Much faster, usually under a second. Instaparser sees each link you send. If it can't read one, LittleSend reads it on this Mac."
+        }
     }
 
     // MARK: - Cover art
 
     private var coverPane: some View {
         Form {
-            Section("Layout") {
+            Section {
                 CoverLayoutGallery(
                     selection: $draft.coverLayout,
                     fontFamily: draft.coverFontFamily,
                     eInk: draft.optimizeCoverForEInk
                 )
                 .frame(maxWidth: .infinity)
-
-                Text(draft.coverLayout.summary)
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Layout")
+            } footer: {
+                SectionNote(draft.coverLayout.summary)
             }
 
             Section("Type") {
-                Picker("Cover font", selection: $draft.coverFontFamily) {
+                Picker(selection: $draft.coverFontFamily) {
                     Text(CoverFont.systemFamilyLabel).tag("")
                     Divider()
                     ForEach(installedFontFamilies, id: \.self) { family in
                         Text(family).tag(family)
                     }
+                } label: {
+                    Text("Cover font")
+                    Text("Any font on this Mac works. The article uses your Kindle's own fonts.")
                 }
 
                 if let warning = coverFontWarning {
@@ -250,119 +412,39 @@ struct SettingsView: View {
                         .font(.appLabel)
                         .foregroundStyle(.orange)
                 }
-
-                Text("Any font on this Mac works for the cover. The article uses your Kindle's own font settings.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Rendering") {
-                Picker("Size", selection: $draft.coverSize) {
+                Picker(selection: $draft.coverSize) {
                     ForEach(CoverSize.allCases, id: \.self) { size in
                         Text(size.displayName).tag(size)
                     }
+                } label: {
+                    Text("Size")
+                    Text(draft.coverSize.summary)
                 }
 
-                Text(draft.coverSize.summary)
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
-
-                Toggle("Optimize Kindle covers for e-ink", isOn: $draft.optimizeCoverForEInk)
-
-                Text("Kindle covers use the 16 grays an e-ink screen can show. Desktop and email covers stay in color. Pick the size that fits your Kindle.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
+                Toggle(isOn: $draft.optimizeCoverForEInk) {
+                    Text("Optimize Kindle covers for e-ink")
+                    Text("Kindle covers use the 16 grays an e-ink screen can show. Desktop and email covers stay in color.")
+                }
             }
         }
         .formStyle(.grouped)
     }
 
-    // MARK: - Everything else
-
-    private var readingPane: some View {
-        Form {
-            Section("Reading articles") {
-                Picker("Read articles with", selection: $draft.articleReader) {
-                    ForEach(ArticleReader.allCases, id: \.self) { reader in
-                        Text(reader.displayName).tag(reader)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-
-                if draft.articleReader == .instaparser {
-                    SecureField("Instaparser API key", text: $draft.instaparserAPIKey)
-                    Link("Get a free API key", destination: URL(string: "https://www.instaparser.com")!)
-                        .font(.appLabel)
-                }
-
-                Text(readerNote)
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Paywalls") {
-                HStack {
-                    Button("Sign In to a Site…") { SiteSignInWindow.shared.show() }
-                    Spacer()
-                    Button("Sign Out of All Sites") {
-                        Task {
-                            await SiteSignInWindow.signOutOfAllSites()
-                            signedOut = true
-                        }
-                    }
-                }
-                Text(signedOut ? "Signed out of all sites." : "Pay for a site? Sign in here once to get full articles. LittleSend can't use Safari's sign-ins.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    private var generalPane: some View {
-        Form {
-            Section("App icon") {
-                Picker("Show LittleSend in", selection: $draft.iconPlacement) {
-                    ForEach(IconPlacement.allCases, id: \.self) { placement in
-                        Text(placement.displayName).tag(placement)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-
-                Text("Menu bar only keeps LittleSend out of the Dock and ⌘Tab, but its menus won't show at the top of the screen.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("When the panel opens") {
-                Picker("Fill the link from", selection: $draft.browserSource) {
-                    ForEach(BrowserSource.allCases, id: \.self) { source in
-                        Text(source.displayName).tag(source)
-                    }
-                }
-
-                Text("macOS asks once before LittleSend can read your browser. If no page is open, LittleSend uses the clipboard.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Feedback") {
-                Toggle("Play sounds", isOn: $draft.playSounds)
-                Text("A chime when a send works, and a low tone if it fails.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
+    // MARK: - Images
 
     private var imagesPane: some View {
         Form {
-            Section("Images") {
+            Section {
                 Toggle("Include images in the EPUB", isOn: $draft.embedImages)
 
-                Toggle("Shrink large images", isOn: $draft.limitImageSize)
-                    .disabled(!draft.embedImages)
+                Toggle(isOn: $draft.limitImageSize) {
+                    Text("Shrink large images")
+                    Text("Bigger images are shrunk to fit. Each one links to the full-size original.")
+                }
+                .disabled(!draft.embedImages)
 
                 LabeledContent("Maximum size") {
                     HStack(spacing: 4) {
@@ -381,14 +463,12 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(!draft.embedImages || !draft.limitImageSize)
-
-                Text("Bigger images are shrunk to fit. Each one links to the full-size original. This only affects the EPUB.")
-                    .font(.appLabel)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
     }
+
+    // MARK: - Save and Revert
 
     private var footer: some View {
         HStack(spacing: 10) {
@@ -414,15 +494,6 @@ struct SettingsView: View {
     /// The actual system table type, not a hand-rolled list — add/remove sit
     /// in a toolbar below it, the standard macOS pattern for an editable
     /// address book (Login Items, Mail's blocked-senders list, and so on).
-    private var readerNote: String {
-        switch draft.articleReader {
-        case .local:
-            return "Reads articles on this Mac. It's free and private, and it reads every page of long articles."
-        case .instaparser:
-            return "Much faster, usually under a second. Free for 1,000 articles a month. Instaparser sees each link you send. If it can't read one, LittleSend reads it on this Mac."
-        }
-    }
-
     private var emailAddressTable: some View {
         Table(draft.emailRecipients.map(AddressRow.init), selection: $selectedAddress) {
             TableColumn("Address") { row in
@@ -483,6 +554,60 @@ struct SettingsView: View {
     }
 }
 
+/// A note under a group of rows, for something that applies to the whole
+/// group rather than one row.
+private struct SectionNote: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.appLabel)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Each pane draws its own heading, System Settings style, so the window's
+/// title strip goes: no centred title, and the sidebar and pane run up under
+/// the window controls. SwiftUI has no way to style a `Settings` window, so
+/// this reaches it from inside. The title stays set, for the Window menu.
+///
+/// SwiftUI puts the title strip back whenever it refreshes the window — a
+/// second or two after opening, and on pane changes — so setting it once does
+/// not stick. The two properties are watched and re-set whenever they change.
+private struct HiddenTitleBar: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Hider() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class Hider: NSView {
+        private var observations: [NSKeyValueObservation] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observations = []
+            guard let window else { return }
+            Self.hideTitle(of: window)
+            observations = [
+                window.observe(\.titleVisibility) { window, _ in
+                    DispatchQueue.main.async { Self.hideTitle(of: window) }
+                },
+                window.observe(\.titlebarAppearsTransparent) { window, _ in
+                    DispatchQueue.main.async { Self.hideTitle(of: window) }
+                },
+            ]
+        }
+
+        private static func hideTitle(of window: NSWindow) {
+            // Only when needed, so re-setting does not notify again.
+            if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
+            if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+            if !window.styleMask.contains(.fullSizeContentView) { window.styleMask.insert(.fullSizeContentView) }
+        }
+    }
+}
+
 /// A sidebar icon in the System Settings style: a white symbol on a small
 /// coloured rounded square.
 private struct PaneIcon: View {
@@ -491,11 +616,11 @@ private struct PaneIcon: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 20, height: 20)
+            .frame(width: 24, height: 24)
             .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(tint.gradient)
             )
     }
