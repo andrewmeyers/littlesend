@@ -14,8 +14,14 @@ enum CRC32 {
 
     static func checksum(_ data: Data) -> UInt32 {
         var c: UInt32 = 0xFFFF_FFFF
-        for byte in data {
-            c = table[Int((c ^ UInt32(byte)) & 0xFF)] ^ (c >> 8)
+        // Over raw buffers: Data's own iterator, and the array's bounds
+        // checks, cost more than the table lookup on a multi-megabyte image.
+        table.withUnsafeBufferPointer { table in
+            data.withUnsafeBytes { bytes in
+                for byte in bytes {
+                    c = table[Int((c ^ UInt32(byte)) & 0xFF)] ^ (c >> 8)
+                }
+            }
         }
         return c ^ 0xFFFF_FFFF
     }

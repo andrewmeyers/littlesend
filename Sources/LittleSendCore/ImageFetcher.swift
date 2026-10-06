@@ -118,8 +118,11 @@ public struct ImageFetcher {
             )
         }
 
+        // A shrink that comes out no smaller — a flat PNG re-encoded as JPEG
+        // can — is discarded in favour of the original, when that is usable.
         if let target = limits.targetBytes, overTarget,
-           let shrunk = ImageResizer.shrink(data, toAtMost: target) {
+           let shrunk = ImageResizer.shrink(data, toAtMost: target),
+           safeType == nil || shrunk.data.count < data.count {
             return EmbeddedImage(
                 sourceURL: url.absoluteString,
                 fileName: "img\(index)\(Self.fileExtension(for: shrunk.mediaType))",

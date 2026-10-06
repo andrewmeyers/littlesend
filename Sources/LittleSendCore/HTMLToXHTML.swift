@@ -77,51 +77,60 @@ public enum HTMLToXHTML {
     ]
 
     /// Rewrites `html` as an XHTML fragment.
+    ///
+    /// The scan runs over UTF-8 bytes. Every byte that means anything here —
+    /// `<`, `>`, `&`, quotes, `=`, `/`, ASCII letters and spaces — is ASCII,
+    /// and no byte of a multi-byte UTF-8 sequence is, so text between them can
+    /// be copied through untouched. Working in `Character`s instead paid for
+    /// grapheme breaking on every character of the article, and for a String
+    /// append for each one.
     public static func convert(_ html: String) -> String {
-        var scanner = Scanner(source: Array(html))
+        var scanner = Scanner(source: Array(html.utf8))
         return scanner.run()
     }
 
     // MARK: - Scanner
 
     private struct Scanner {
-        let source: [Character]
+        let source: [UInt8]
         var index = 0
-        var output = ""
+        var output: [UInt8] = []
         var openElements: [String] = []
 
-        init(source: [Character]) {
+        init(source: [UInt8]) {
             self.source = source
+            output.reserveCapacity(source.count + source.count / 8)
         }
 
         mutating func run() -> String {
             while index < source.count {
-                if source[index] == "<" {
+                if source[index] == ASCIIByte.lessThan {
                     if consumeComment() { continue }
                     if consumeDoctype() { continue }
                     if consumeTag() { continue }
                     // A bare "<" that does not start a tag: emit it as text.
-                    output += "&lt;"
+                    emit("&lt;")
                     index += 1
                 } else {
                     consumeText()
                 }
             }
             while let name = openElements.popLast() {
-                output += "</\(name)>"
+                emit("</\(name)>")
             }
-            return output
+            return String(decoding: output, as: UTF8.self)
+        }
+
+        mutating func emit(_ string: String) {
+            output.append(contentsOf: string.utf8)
         }
 
         // MARK: Text
 
         mutating func consumeText() {
-            var text = ""
-            while index < source.count, source[index] != "<" {
-                text.append(source[index])
-                index += 1
-            }
-            output += escapeText(text)
+            let start = index
+            while index < source.count, source[index] != ASCIIByte.lessThan { index += 1 }
+            HTMLToXHTML.appendEscapedText(source[start..<index], to: &output)
         }
 
         // MARK: Comments and doctype
@@ -130,7 +139,7 @@ public enum HTMLToXHTML {
             guard matches("<!--") else { return false }
             index += 4
             while index < source.count {
-                if matches("-->") {
+                if source[index] == ASCIIByte.hyphen, matches("-->") {
                     index += 3
                     return true
                 }
@@ -141,7 +150,7 @@ public enum HTMLToXHTML {
 
         mutating func consumeDoctype() -> Bool {
             guard matches("<!") || matches("<?") else { return false }
-            while index < source.count, source[index] != ">" { index += 1 }
+            while index < source.count, source[index] != ASCIIByte.greaterThan { index += 1 }
             if index < source.count { index += 1 }
             return true
         }
@@ -149,19 +158,16 @@ public enum HTMLToXHTML {
         // MARK: Tags
 
         mutating func consumeTag() -> Bool {
-            let start = index
             guard index + 1 < source.count else { return false }
             var cursor = index + 1
-            let isClosing = source[cursor] == "/"
+            let isClosing = source[cursor] == ASCIIByte.slash
             if isClosing { cursor += 1 }
-            guard cursor < source.count, source[cursor].isLetter else { return false }
+            // HTML tag names begin with an ASCII letter; "<é" or "< 3" is text.
+            guard cursor < source.count, ASCIIByte.isLetter(source[cursor]) else { return false }
 
-            var name = ""
-            while cursor < source.count, source[cursor].isLetter || source[cursor].isNumber {
-                name.append(source[cursor])
-                cursor += 1
-            }
-            name = name.lowercased()
+            let nameStart = cursor
+            while cursor < source.count, ASCIIByte.isLetterOrDigit(source[cursor]) { cursor += 1 }
+            let name = String(decoding: source[nameStart..<cursor], as: UTF8.self).lowercased()
 
             index = cursor
             let attributes = isClosing ? [:] : parseAttributes()
@@ -182,7 +188,6 @@ public enum HTMLToXHTML {
 
             guard allowed.contains(name) else {
                 // Unknown element: unwrap it, keeping its children.
-                _ = start
                 return true
             }
 
@@ -200,24 +205,25 @@ public enum HTMLToXHTML {
             while index < source.count {
                 skipWhitespace()
                 guard index < source.count else { break }
-                if source[index] == ">" || source[index] == "/" { break }
+                if source[index] == ASCIIByte.greaterThan || source[index] == ASCIIByte.slash { break }
 
-                var name = ""
+                let nameStart = index
                 while index < source.count,
-                      !source[index].isWhitespace,
-                      source[index] != "=", source[index] != ">", source[index] != "/" {
-                    name.append(source[index])
+                      !ASCIIByte.isWhitespace(source[index]),
+                      source[index] != ASCIIByte.equals,
+                      source[index] != ASCIIByte.greaterThan,
+                      source[index] != ASCIIByte.slash {
                     index += 1
                 }
-                if name.isEmpty {
+                if index == nameStart {
                     index += 1
                     continue
                 }
-                name = name.lowercased()
+                let name = String(decoding: source[nameStart..<index], as: UTF8.self).lowercased()
 
                 skipWhitespace()
                 var value = name  // boolean attribute: value defaults to its own name
-                if index < source.count, source[index] == "=" {
+                if index < source.count, source[index] == ASCIIByte.equals {
                     index += 1
                     skipWhitespace()
                     value = parseAttributeValue()
@@ -232,29 +238,26 @@ public enum HTMLToXHTML {
         mutating func parseAttributeValue() -> String {
             guard index < source.count else { return "" }
             let quote = source[index]
-            if quote == "\"" || quote == "'" {
+            if quote == ASCIIByte.doubleQuote || quote == ASCIIByte.singleQuote {
                 index += 1
-                var value = ""
-                while index < source.count, source[index] != quote {
-                    value.append(source[index])
-                    index += 1
-                }
+                let start = index
+                while index < source.count, source[index] != quote { index += 1 }
+                let value = String(decoding: source[start..<index], as: UTF8.self)
                 if index < source.count { index += 1 }
                 return value
             }
-            var value = ""
-            while index < source.count, !source[index].isWhitespace, source[index] != ">" {
-                value.append(source[index])
+            let start = index
+            while index < source.count, !ASCIIByte.isWhitespace(source[index]), source[index] != ASCIIByte.greaterThan {
                 index += 1
             }
-            return value
+            return String(decoding: source[start..<index], as: UTF8.self)
         }
 
         /// Advances past `>`, reporting whether the tag was self-closing.
         mutating func skipToTagEnd() -> Bool {
             var selfClosed = false
-            while index < source.count, source[index] != ">" {
-                if source[index] == "/" { selfClosed = true }
+            while index < source.count, source[index] != ASCIIByte.greaterThan {
+                if source[index] == ASCIIByte.slash { selfClosed = true }
                 index += 1
             }
             if index < source.count { index += 1 }
@@ -264,7 +267,7 @@ public enum HTMLToXHTML {
         mutating func skipElementContent(named name: String) {
             var depth = 1
             while index < source.count, depth > 0 {
-                guard source[index] == "<" else {
+                guard source[index] == ASCIIByte.lessThan else {
                     index += 1
                     continue
                 }
@@ -289,13 +292,13 @@ public enum HTMLToXHTML {
             }
             if voidElements.contains(name) {
                 tag += "/>"
-                output += tag
+                emit(tag)
                 return
             }
             tag += ">"
-            output += tag
+            emit(tag)
             if selfClosed {
-                output += "</\(name)>"
+                emit("</\(name)>")
             } else {
                 openElements.append(name)
             }
@@ -307,39 +310,75 @@ public enum HTMLToXHTML {
             // Close everything the source left open inside this element.
             while openElements.count > position {
                 let open = openElements.removeLast()
-                output += "</\(open)>"
+                emit("</\(open)>")
             }
         }
 
         // MARK: Helpers
 
         mutating func skipWhitespace() {
-            while index < source.count, source[index].isWhitespace { index += 1 }
+            while index < source.count, ASCIIByte.isWhitespace(source[index]) { index += 1 }
         }
 
+        /// Whether `string` (ASCII) appears at the current position.
         func matches(_ string: String) -> Bool {
-            let characters = Array(string)
-            guard index + characters.count <= source.count else { return false }
-            for (offset, character) in characters.enumerated()
-            where source[index + offset] != character {
-                return false
+            var cursor = index
+            for byte in string.utf8 {
+                guard cursor < source.count, source[cursor] == byte else { return false }
+                cursor += 1
             }
             return true
         }
 
+        /// Whether a start or end tag for `name` (lowercase ASCII) begins at
+        /// the current position, in any letter case.
         func matchesTag(_ name: String, closing: Bool) -> Bool {
-            let prefix = closing ? "</\(name)" : "<\(name)"
-            let characters = Array(prefix)
-            guard index + characters.count <= source.count else { return false }
-            for (offset, character) in characters.enumerated()
-            where Character(String(source[index + offset]).lowercased()) != character {
-                return false
+            guard index < source.count, source[index] == ASCIIByte.lessThan else { return false }
+            var cursor = index + 1
+            if closing {
+                guard cursor < source.count, source[cursor] == ASCIIByte.slash else { return false }
+                cursor += 1
+            }
+            for byte in name.utf8 {
+                guard cursor < source.count, ASCIIByte.lowercased(source[cursor]) == byte else { return false }
+                cursor += 1
             }
             // Ensure the tag name ended rather than matching a longer name.
-            let next = index + characters.count
-            guard next < source.count else { return true }
-            let following = source[next]
-            return following.isWhitespace || following == ">" || following == "/"
+            guard cursor < source.count else { return true }
+            let following = source[cursor]
+            return ASCIIByte.isWhitespace(following) || following == ASCIIByte.greaterThan || following == ASCIIByte.slash
+        }
+    }
+
+    /// The ASCII bytes the scanners care about.
+    private enum ASCIIByte {
+        static let lessThan = UInt8(ascii: "<")
+        static let greaterThan = UInt8(ascii: ">")
+        static let slash = UInt8(ascii: "/")
+        static let equals = UInt8(ascii: "=")
+        static let hyphen = UInt8(ascii: "-")
+        static let ampersand = UInt8(ascii: "&")
+        static let semicolon = UInt8(ascii: ";")
+        static let hash = UInt8(ascii: "#")
+        static let doubleQuote = UInt8(ascii: "\"")
+        static let singleQuote = UInt8(ascii: "'")
+        static let newline = UInt8(ascii: "\n")
+
+        static func isLetter(_ byte: UInt8) -> Bool {
+            (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)
+        }
+
+        static func isLetterOrDigit(_ byte: UInt8) -> Bool {
+            isLetter(byte) || (byte >= 0x30 && byte <= 0x39)
+        }
+
+        /// HTML's whitespace: space, tab, LF, VT, FF, CR.
+        static func isWhitespace(_ byte: UInt8) -> Bool {
+            byte == 0x20 || (byte >= 0x09 && byte <= 0x0D)
+        }
+
+        static func lowercased(_ byte: UInt8) -> UInt8 {
+            byte >= 0x41 && byte <= 0x5A ? byte + 0x20 : byte
         }
     }
 
@@ -353,34 +392,38 @@ public enum HTMLToXHTML {
     /// Escapes text content, converting HTML named entities into numeric ones
     /// and neutralizing any ampersand that does not begin a valid reference.
     static func escapeText(_ text: String) -> String {
-        var result = ""
-        result.reserveCapacity(text.count)
-        let characters = Array(text)
-        var index = 0
+        let bytes = Array(text.utf8)
+        var output: [UInt8] = []
+        output.reserveCapacity(bytes.count)
+        appendEscapedText(bytes[...], to: &output)
+        return String(decoding: output, as: UTF8.self)
+    }
 
-        while index < characters.count {
-            let character = characters[index]
-            switch character {
-            case "<":
-                result += "&lt;"
+    /// `escapeText`, appending UTF-8 to `output`. Slice indices are positions
+    /// in the parent array, so the walk runs from `startIndex`, not from 0.
+    static func appendEscapedText(_ bytes: ArraySlice<UInt8>, to output: inout [UInt8]) {
+        var index = bytes.startIndex
+        while index < bytes.endIndex {
+            let byte = bytes[index]
+            if byte == ASCIIByte.lessThan {
+                output.append(contentsOf: "&lt;".utf8)
                 index += 1
-            case ">":
-                result += "&gt;"
+            } else if byte == ASCIIByte.greaterThan {
+                output.append(contentsOf: "&gt;".utf8)
                 index += 1
-            case "&":
-                if let (replacement, length) = entityReference(in: characters, at: index) {
-                    result += replacement
+            } else if byte == ASCIIByte.ampersand {
+                if let (replacement, length) = entityReference(in: bytes, at: index) {
+                    output.append(contentsOf: replacement.utf8)
                     index += length
                 } else {
-                    result += "&amp;"
+                    output.append(contentsOf: "&amp;".utf8)
                     index += 1
                 }
-            default:
-                result.append(character)
+            } else {
+                output.append(byte)
                 index += 1
             }
         }
-        return result
     }
 
     static func escapeAttribute(_ value: String) -> String {
@@ -391,33 +434,34 @@ public enum HTMLToXHTML {
     }
 
     /// Reads an entity reference beginning at `start`, returning its XML-safe
-    /// form and the number of characters consumed.
-    private static func entityReference(in characters: [Character], at start: Int) -> (String, Int)? {
+    /// form and the number of bytes consumed.
+    private static func entityReference(in bytes: ArraySlice<UInt8>, at start: Int) -> (String, Int)? {
         var cursor = start + 1
-        guard cursor < characters.count else { return nil }
+        guard cursor < bytes.endIndex else { return nil }
 
-        if characters[cursor] == "#" {
+        if bytes[cursor] == ASCIIByte.hash {
             cursor += 1
-            var digits = ""
-            let isHex = cursor < characters.count && (characters[cursor] == "x" || characters[cursor] == "X")
+            let isHex = cursor < bytes.endIndex
+                && (bytes[cursor] == UInt8(ascii: "x") || bytes[cursor] == UInt8(ascii: "X"))
             if isHex { cursor += 1 }
-            while cursor < characters.count, characters[cursor] != ";" {
-                digits.append(characters[cursor])
+            let digitsStart = cursor
+            while cursor < bytes.endIndex, bytes[cursor] != ASCIIByte.semicolon {
                 cursor += 1
-                if digits.count > 8 { return nil }
+                if cursor - digitsStart > 8 { return nil }
             }
-            guard cursor < characters.count, !digits.isEmpty else { return nil }
+            guard cursor < bytes.endIndex, cursor > digitsStart else { return nil }
+            let digits = String(decoding: bytes[digitsStart..<cursor], as: UTF8.self)
             guard let value = UInt32(digits, radix: isHex ? 16 : 10), isValidXMLScalar(value) else { return nil }
             return ("&#\(value);", cursor - start + 1)
         }
 
-        var name = ""
-        while cursor < characters.count, characters[cursor] != ";" {
-            name.append(characters[cursor])
+        let nameStart = cursor
+        while cursor < bytes.endIndex, bytes[cursor] != ASCIIByte.semicolon {
             cursor += 1
-            if name.count > 12 { return nil }
+            if cursor - nameStart > 12 { return nil }
         }
-        guard cursor < characters.count, !name.isEmpty else { return nil }
+        guard cursor < bytes.endIndex, cursor > nameStart else { return nil }
+        let name = String(decoding: bytes[nameStart..<cursor], as: UTF8.self)
 
         if ["amp", "lt", "gt", "quot", "apos"].contains(name) {
             return ("&\(name);", cursor - start + 1)
@@ -448,33 +492,40 @@ public enum HTMLToXHTML {
     /// Strips all markup, used for the plain-text fallback and for the
     /// plain-text alternative of the HTML email.
     public static func plainText(_ html: String) -> String {
-        let characters = Array(convert(html))
-        var text = ""
+        plainText(fromXHTML: convert(html))
+    }
+
+    /// `plainText(_:)` for markup that has already been through `convert`,
+    /// so a caller holding the XHTML does not pay for a second conversion.
+    static func plainText(fromXHTML xhtml: String) -> String {
+        let bytes = Array(xhtml.utf8)
+        var textBytes: [UInt8] = []
+        textBytes.reserveCapacity(bytes.count)
         var index = 0
 
-        while index < characters.count {
-            guard characters[index] == "<" else {
-                text.append(characters[index])
-                index += 1
+        while index < bytes.count {
+            guard bytes[index] == ASCIIByte.lessThan else {
+                let start = index
+                while index < bytes.count, bytes[index] != ASCIIByte.lessThan { index += 1 }
+                textBytes.append(contentsOf: bytes[start..<index])
                 continue
             }
 
             // Read the tag name so block boundaries can become line breaks.
             var cursor = index + 1
-            if cursor < characters.count, characters[cursor] == "/" { cursor += 1 }
-            var name = ""
-            while cursor < characters.count, characters[cursor].isLetter || characters[cursor].isNumber {
-                name.append(characters[cursor])
-                cursor += 1
-            }
-            while cursor < characters.count, characters[cursor] != ">" { cursor += 1 }
-            index = cursor < characters.count ? cursor + 1 : characters.count
+            if cursor < bytes.count, bytes[cursor] == ASCIIByte.slash { cursor += 1 }
+            let nameStart = cursor
+            while cursor < bytes.count, ASCIIByte.isLetterOrDigit(bytes[cursor]) { cursor += 1 }
+            let name = String(decoding: bytes[nameStart..<cursor], as: UTF8.self)
+            while cursor < bytes.count, bytes[cursor] != ASCIIByte.greaterThan { cursor += 1 }
+            index = cursor < bytes.count ? cursor + 1 : bytes.count
 
             // Inline tags vanish without a trace; block tags end the line.
             if blockElements.contains(name.lowercased()) {
-                text.append("\n")
+                textBytes.append(ASCIIByte.newline)
             }
         }
+        let text = String(decoding: textBytes, as: UTF8.self)
 
         let decoded = text
             .replacingOccurrences(of: "&lt;", with: "<")

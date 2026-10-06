@@ -19,6 +19,13 @@ public enum ImageResizer {
     /// Quality steps tried at each pixel size.
     static let qualitySteps: [CGFloat] = [0.75, 0.55, 0.4]
 
+    /// When the first quality step comes out more than this many times over
+    /// the limit, the lower ones are skipped at that pixel size. Dropping from
+    /// 0.75 to 0.4 saves roughly half, not two thirds, so they could not get
+    /// there — and at full resolution each wasted encode of a large photo is
+    /// the slowest thing the resizer does.
+    static let hopelessOvershoot = 3
+
     public struct Result: Sendable, Equatable {
         public let data: Data
         public let mediaType: String
@@ -37,8 +44,11 @@ public enum ImageResizer {
 
         var smallest: Data?
 
-        for pixelLimit in pixelSteps {
+        for (step, pixelLimit) in pixelSteps.enumerated() {
             guard let image = makeImage(from: source, maxPixelSize: pixelLimit) else { continue }
+            // The last size always runs every quality, so the best-effort
+            // result below is as small as it ever was.
+            let isLastStep = step == pixelSteps.count - 1
 
             for quality in qualitySteps {
                 guard let encoded = encodeJPEG(image, quality: quality) else { continue }
@@ -48,6 +58,7 @@ public enum ImageResizer {
                 if encoded.count < (smallest?.count ?? Int.max) {
                     smallest = encoded
                 }
+                if !isLastStep, encoded.count / hopelessOvershoot > limit { break }
             }
         }
 

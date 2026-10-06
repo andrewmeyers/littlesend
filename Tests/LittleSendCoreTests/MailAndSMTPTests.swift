@@ -98,6 +98,16 @@ final class MailMessageTests: XCTestCase {
         XCTAssertEqual(Data(base64Encoded: encoded), payload)
     }
 
+    func testBase64BodiesAreWrappedAt76WithCRLF() {
+        let lines = MailMessage.base64Lines(Data(repeating: 0xAB, count: 1000))
+            .components(separatedBy: "\r\n")
+
+        XCTAssertGreaterThan(lines.count, 1)
+        XCTAssertTrue(lines.dropLast().allSatisfy { $0.count == 76 })
+        XCTAssertLessThanOrEqual(lines.last?.count ?? 0, 76)
+        XCTAssertFalse(lines.contains { $0.contains("\n") || $0.contains("\r") })
+    }
+
     func testMessageIDUsesTheSenderDomain() {
         let text = String(decoding: message().serialized(boundary: "B"), as: UTF8.self)
         let line = text.components(separatedBy: "\r\n").first { $0.hasPrefix("Message-ID:") }
@@ -159,6 +169,33 @@ final class SMTPProtocolTests: XCTestCase {
         var buffer = Data("250-smtp.example.com\r\n250-PIPE".utf8)
         XCTAssertNil(SMTPClient.parseReply(from: &buffer))
         XCTAssertFalse(buffer.isEmpty)
+    }
+
+    func testBareCodeEndsAReply() {
+        var buffer = Data("250-smtp.example.com\r\n250\r\n".utf8)
+        let reply = SMTPClient.parseReply(from: &buffer)
+
+        XCTAssertEqual(reply?.code, 250)
+        XCTAssertEqual(reply?.lines.count, 2)
+        XCTAssertTrue(buffer.isEmpty)
+    }
+
+    func testNonUTF8ReplyConsumesExactlyItsBytes() {
+        // 0xE9 is "é" in Latin-1 and invalid on its own as UTF-8.
+        var buffer = Data("550 caf".utf8) + Data([0xE9]) + Data("\r\n220 next\r\n".utf8)
+        XCTAssertEqual(SMTPClient.parseReply(from: &buffer)?.code, 550)
+        XCTAssertEqual(SMTPClient.parseReply(from: &buffer)?.code, 220)
+        XCTAssertTrue(buffer.isEmpty)
+    }
+
+    func testDotStuffingPassesThroughMessagesWithoutLeadingDots() {
+        let input = Data("Subject: x\r\n\r\nYWJj\r\n".utf8)
+        XCTAssertEqual(SMTPClient.dotStuffed(input), input)
+    }
+
+    func testDotStuffingHandlesALeadingDotOnTheFirstLine() {
+        let input = Data(".first\r\nsecond\r\n".utf8)
+        XCTAssertEqual(String(decoding: SMTPClient.dotStuffed(input), as: UTF8.self), "..first\r\nsecond\r\n")
     }
 
     func testTrailingBytesAfterReplyAreRetained() {

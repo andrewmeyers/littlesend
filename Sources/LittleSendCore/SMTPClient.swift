@@ -37,9 +37,23 @@ public final class SMTPClient {
     private let queue = DispatchQueue(label: "com.littlesend.smtp")
     private var connection: NWConnection?
     private var buffer = Data()
+    /// How long to wait for any reply from the server. A server that accepts
+    /// the connection and then goes quiet would otherwise hold the send open
+    /// forever: nothing else ends a read that never completes.
+    private let replyTimeout: TimeInterval
+    /// The same, for the reply to the finished message, which the server only
+    /// sends once it has processed the whole thing. RFC 5321 §4.5.3.2.6
+    /// suggests 10 minutes.
+    private let messageAcceptanceTimeout: TimeInterval
 
-    public init(configuration: SMTPConfiguration) {
+    public init(
+        configuration: SMTPConfiguration,
+        replyTimeout: TimeInterval = 120,
+        messageAcceptanceTimeout: TimeInterval = 600
+    ) {
         self.configuration = configuration
+        self.replyTimeout = replyTimeout
+        self.messageAcceptanceTimeout = messageAcceptanceTimeout
     }
 
     public func send(envelopeFrom: String, recipients: [String], message: Data) async throws {
@@ -78,7 +92,9 @@ public final class SMTPClient {
         payload.append(contentsOf: Array("\r\n.\r\n".utf8))
         try await write(payload)
 
-        let accepted = try await readReply()
+        // The upload itself is not timed: on a slow uplink a large book can
+        // take minutes to leave while still making progress.
+        let accepted = try await readReply(timeout: messageAcceptanceTimeout)
         try expect(accepted, code: 250, step: "message body")
 
         _ = try? await command("QUIT")
@@ -145,7 +161,11 @@ public final class SMTPClient {
         }
 
         let options = NWProtocolTLS.Options()
-        let parameters = NWParameters(tls: options, tcp: NWProtocolTCP.Options())
+        let tcp = NWProtocolTCP.Options()
+        // Without this a host that never answers leaves the send spinning for
+        // as long as the system's own default, which is minutes.
+        tcp.connectionTimeout = 30
+        let parameters = NWParameters(tls: options, tcp: tcp)
         let connection = NWConnection(
             host: NWEndpoint.Host(configuration.host), port: port, using: parameters
         )
@@ -184,7 +204,7 @@ public final class SMTPClient {
     }
 
     private func command(_ line: String, redacted: String? = nil) async throws -> Reply {
-        try await write(Array("\(line)\r\n".utf8))
+        try await write(Data("\(line)\r\n".utf8))
         do {
             return try await readReply()
         } catch let error as SMTPError {
@@ -193,12 +213,12 @@ public final class SMTPClient {
         }
     }
 
-    private func write(_ bytes: [UInt8]) async throws {
+    private func write(_ bytes: Data) async throws {
         guard let connection else {
             throw SMTPError(code: nil, message: "The SMTP connection is not open.")
         }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            connection.send(content: Data(bytes), completion: .contentProcessed { error in
+            connection.send(content: bytes, completion: .contentProcessed { error in
                 if let error {
                     continuation.resume(throwing: SMTPError(code: nil, message: "Send failed: \(error.localizedDescription)"))
                 } else {
@@ -208,10 +228,10 @@ public final class SMTPClient {
         }
     }
 
-    private func readReply() async throws -> Reply {
+    private func readReply(timeout: TimeInterval? = nil) async throws -> Reply {
         while true {
             if let reply = Self.parseReply(from: &buffer) { return reply }
-            let chunk = try await receive()
+            let chunk = try await receive(timeout: timeout ?? replyTimeout)
             guard !chunk.isEmpty else {
                 throw SMTPError(code: nil, message: "The server closed the connection unexpectedly.")
             }
@@ -219,12 +239,29 @@ public final class SMTPClient {
         }
     }
 
-    private func receive() async throws -> Data {
+    private func receive(timeout: TimeInterval) async throws -> Data {
         guard let connection else {
             throw SMTPError(code: nil, message: "The SMTP connection is not open.")
         }
+        let host = configuration.host
         return try await withCheckedThrowingContinuation { continuation in
+            // Whichever comes first — data or the deadline — resumes the
+            // continuation. The watchdog resumes it itself rather than relying
+            // on `cancel()` to complete the pending read.
+            let gate = ResumeGate()
+            let watchdog = DispatchWorkItem {
+                guard gate.claim() else { return }
+                connection.cancel()
+                continuation.resume(throwing: SMTPError(
+                    code: nil,
+                    message: "\(host) stopped responding: no reply in \(Int(timeout)) seconds."
+                ))
+            }
+            queue.asyncAfter(deadline: .now() + timeout, execute: watchdog)
+
             connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+                watchdog.cancel()
+                guard gate.claim() else { return }
                 if let error {
                     continuation.resume(throwing: SMTPError(code: nil, message: "Read failed: \(error.localizedDescription)"))
                 } else if let data, !data.isEmpty {
@@ -239,27 +276,31 @@ public final class SMTPClient {
     }
 
     /// Consumes one complete reply from `buffer`, if a terminal line is present.
-    /// SMTP continuation lines use `250-`; the final line uses `250 `.
+    /// SMTP continuation lines use `250-`; the final line uses `250 `, or is
+    /// the bare code (RFC 5321 §4.2 makes the text optional).
+    ///
+    /// Lines are found in the bytes, not in a decoded copy: decoding a non-UTF-8
+    /// reply as Latin-1 changed its length, so the count of bytes to consume
+    /// came out wrong.
     static func parseReply(from buffer: inout Data) -> Reply? {
-        guard let text = String(data: buffer, encoding: .utf8) ?? String(data: buffer, encoding: .isoLatin1) else {
-            return nil
-        }
+        let crlf = Data("\r\n".utf8)
         var lines: [String] = []
-        var consumed = 0
+        var lineStart = buffer.startIndex
 
-        for rawLine in text.components(separatedBy: "\r\n") {
-            let lineLength = rawLine.utf8.count + 2
-            guard consumed + lineLength <= buffer.count else { break }
-            consumed += lineLength
+        while let lineEnd = buffer.range(of: crlf, in: lineStart..<buffer.endIndex) {
+            let bytes = buffer[lineStart..<lineEnd.lowerBound]
+            lineStart = lineEnd.upperBound
+            let rawLine = String(data: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
 
             let characters = Array(rawLine)
-            guard characters.count >= 4, let parsed = Int(String(characters[0..<3])) else {
+            guard characters.count >= 3, let parsed = Int(String(characters[0..<3])) else {
                 lines.append(rawLine)
                 continue
             }
-            lines.append(String(characters[4...]))
-            if characters[3] == " " {
-                buffer.removeFirst(consumed)
+            let isLast = characters.count == 3 || characters[3] == " "
+            lines.append(characters.count > 4 ? String(characters[4...]) : "")
+            if isLast {
+                buffer.removeSubrange(buffer.startIndex..<lineStart)
                 return Reply(code: parsed, lines: lines)
             }
         }
@@ -267,8 +308,14 @@ public final class SMTPClient {
     }
 
     /// RFC 5321 dot-stuffing: a line starting with "." gets an extra ".".
-    static func dotStuffed(_ message: Data) -> [UInt8] {
-        var output: [UInt8] = []
+    ///
+    /// Every body part is base64, whose alphabet has no ".", so most messages
+    /// need no stuffing at all and are passed through without a byte-by-byte copy.
+    static func dotStuffed(_ message: Data) -> Data {
+        if message.first != 0x2E, message.range(of: Data("\n.".utf8)) == nil {
+            return message
+        }
+        var output = Data()
         output.reserveCapacity(message.count + 16)
         var atLineStart = true
 
