@@ -14,7 +14,12 @@ import LittleSendCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
+    /// The default: the panel hanging from the menu bar icon, which can be
+    /// dragged off into a window of its own.
+    private var popover: AttachedPopover?
+    /// A standalone window, for when there is no menu bar icon to hang from.
     private var panel: MainPanel?
+    private var stagedFileWatch: AnyCancellable?
     private var activityWatch: AnyCancellable?
     private var placementWatch: AnyCancellable?
     private var resetIcon: DispatchWorkItem?
@@ -77,14 +82,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] activity in self?.showIcon(for: activity) }
 
+        popover = AttachedPopover(content: rootView())
         panel = MainPanel(content: { [weak self] in
-            guard let self else { return AnyView(EmptyView()) }
-            return AnyView(
-                MenuContentView()
-                    .environmentObject(self.model)
-                    .environmentObject(self.preferences)
-            )
+            self?.rootView() ?? AnyView(EmptyView())
         })
+
+        // A file picked in the chooser lands after the popover has closed —
+        // the chooser is a click outside it — so bring the panel back to show
+        // the file waiting for Send.
+        stagedFileWatch = model.$attachedFile
+            .dropFirst()
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.visibleMainWindow == nil else { return }
+                self.show()
+            }
 
         // Settings opens through SwiftUI, not through show(), so window
         // stacking follows key windows generally rather than just the panel.
@@ -96,15 +109,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
 
         // Launching the app means wanting to use it: open the main panel, not
-        // Settings.
-        show()
+        // Settings. A turn of the run loop later, so the menu bar has placed
+        // the icon the popover hangs from.
+        DispatchQueue.main.async { [weak self] in self?.show() }
+    }
+
+    private func rootView() -> AnyView {
+        AnyView(
+            MenuContentView()
+                .environmentObject(model)
+                .environmentObject(preferences)
+        )
     }
 
     /// Opening the app again while it is running — from Finder, Spotlight, or
     /// its Dock icon — brings up the panel. Returning false stops SwiftUI's
     /// default, which would open Settings as the only window it knows about.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if panel?.isVisible != true { show() }
+        show()
         return false
     }
 
@@ -116,6 +138,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyIconPlacement(_ placement: IconPlacement) {
         statusItem?.isVisible = placement.showsMenuBarIcon
+        // Nothing left to hang from. A popover already pulled off into its own
+        // window has no anchor to lose, so it stays.
+        if !placement.showsMenuBarIcon, popover?.isAttached == true {
+            popover?.close()
+        }
 
         let policy = activationPolicy(for: placement)
         guard NSApp.activationPolicy() != policy else { return }
@@ -170,24 +197,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + linger, execute: work)
     }
 
+    /// Whichever of the popover or the standalone panel is on screen.
+    private var visibleMainWindow: NSWindow? {
+        popover?.window ?? panel?.window
+    }
+
+    /// The menu bar icon's click. Closes an attached popover; for a window
+    /// that has been pulled off, it brings it forward if it is covered and
+    /// closes it if it is already the one in use.
     @objc private func toggle() {
-        if panel?.isVisible == true {
-            panel?.toggle(relativeTo: statusItem?.button)
-        } else {
+        guard let window = visibleMainWindow else {
+            // This same click may already have closed the popover, on
+            // mouse-down; reopening it here would undo that.
+            if let popover, Date().timeIntervalSince(popover.lastClosed) < 0.3 { return }
             show()
+            return
+        }
+        if popover?.isAttached == true || (window.isKeyWindow && NSApp.isActive) {
+            closeMainWindow()
+        } else {
+            bringForward(window)
         }
     }
 
+    private func closeMainWindow() {
+        if popover?.isShown == true { popover?.close() }
+        if panel?.isVisible == true { panel?.hide() }
+    }
+
+    private func bringForward(_ window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
     func show() {
+        // Already up — attached, pulled off, or standalone: bring it forward
+        // and leave whatever is being typed in it alone.
+        if let window = visibleMainWindow {
+            bringForward(window)
+            return
+        }
+
         // Filling and focusing happen here rather than in the view's onAppear:
-        // the panel is built once and reused, so onAppear fires on the first
+        // the content is built once and reused, so onAppear fires on the first
         // open only and every reopen after it would arrive stale and unfocused.
         model.prefill()
         model.requestFocus()
-        // Under the menu bar icon when there is one; otherwise near the top
-        // of the screen.
-        let anchor = preferences.iconPlacement.showsMenuBarIcon ? statusItem?.button : nil
-        panel?.show(relativeTo: anchor)
+
+        // Hanging from the menu bar icon when there is one; otherwise a window
+        // of its own near the top of the screen.
+        if preferences.iconPlacement.showsMenuBarIcon, let button = statusItem?.button {
+            popover?.show(relativeTo: button)
+        } else {
+            panel?.show(relativeTo: nil)
+        }
     }
 }
 

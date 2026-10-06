@@ -389,7 +389,8 @@ public struct ArticleSender {
 
     // MARK: - Destinations
 
-    /// The Desktop copy, in whichever format was chosen for it.
+    /// Writes the Desktop copy in whichever format was chosen for it. Async
+    /// only because a PDF fetches full-size images and renders through WebKit.
     private func saveDesktopCopy(
         article: ParsedArticle,
         book: EPUBBuilder.Result?,
@@ -426,7 +427,7 @@ public struct ArticleSender {
             return DeliveryResult(
                 kind: .desktop,
                 recipients: [],
-                errorMessage: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                errorMessage: Self.describe(error)
             )
         }
         return saveToDesktop(data: data, fileName: DocumentRenderer.fileName(for: article, format: format))
@@ -440,7 +441,7 @@ public struct ArticleSender {
             return DeliveryResult(
                 kind: .desktop,
                 recipients: [],
-                errorMessage: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                errorMessage: Self.describe(error)
             )
         }
 
@@ -453,7 +454,7 @@ public struct ArticleSender {
             return DeliveryResult(
                 kind: .desktop,
                 recipients: [],
-                errorMessage: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                errorMessage: Self.describe(error)
             )
         }
     }
@@ -540,6 +541,11 @@ public struct ArticleSender {
         ).folder
     }
 
+    /// The message shown for a failed destination.
+    private static func describe(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
     private func deliver(
         kind: DeliveryResult.Kind,
         recipients: [String],
@@ -559,8 +565,7 @@ public struct ArticleSender {
             )
             return DeliveryResult(kind: kind, recipients: recipients, errorMessage: nil)
         } catch {
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            return DeliveryResult(kind: kind, recipients: recipients, errorMessage: message)
+            return DeliveryResult(kind: kind, recipients: recipients, errorMessage: Self.describe(error))
         }
     }
 }

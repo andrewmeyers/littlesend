@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The app's window: a floating panel that stays put.
+/// The standalone window, used when there is no menu bar icon for the popover
+/// to hang from (icon placement "Dock only"): a floating panel that stays put.
 ///
 /// This replaces `MenuBarExtra`'s popover, which dismissed the instant the app
 /// resigned key. That made the whole file flow awkward — picking a file up from
@@ -22,6 +23,13 @@ final class MainPanel {
 
     var isVisible: Bool { panel?.isVisible ?? false }
 
+    /// The panel's window while it is on screen.
+    var window: NSWindow? { isVisible ? panel : nil }
+
+    func hide() {
+        panel?.orderOut(nil)
+    }
+
     /// Whether `window` is this panel.
     func owns(_ window: NSWindow) -> Bool { window === panel }
 
@@ -29,15 +37,6 @@ final class MainPanel {
     /// Finder; normal lets the app's own windows, like Settings, sit above it.
     func setFloating(_ floating: Bool) {
         panel?.level = floating ? .floating : .normal
-    }
-
-    /// Shows the panel, or hides it if it is already up.
-    func toggle(relativeTo button: NSStatusBarButton?) {
-        if isVisible {
-            panel?.orderOut(nil)
-        } else {
-            show(relativeTo: button)
-        }
     }
 
     func show(relativeTo button: NSStatusBarButton?) {
