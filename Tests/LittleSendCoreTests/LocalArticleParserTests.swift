@@ -35,6 +35,32 @@ final class LocalReaderMappingTests: XCTestCase {
         XCTAssertEqual(article.publishedDate, expected)
     }
 
+    func testPaywallPreviewIsCarriedThrough() throws {
+        let preview = try parse(["ok": true, "title": "T", "content": "<p>x</p>", "preview": true])
+        XCTAssertTrue(preview.isPreview)
+
+        let whole = try parse(["ok": true, "title": "T", "content": "<p>x</p>"])
+        XCTAssertFalse(whole.isPreview, "no flag means the whole article")
+    }
+
+    /// The paywall check needs `await`, so the script is run as an async
+    /// function body — an IIFE wrapper would return a Promise, not the JSON.
+    func testExtractionScriptIsAnAsyncFunctionBody() {
+        let script = LocalArticleParser.extractionScript
+        XCTAssertFalse(script.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("(function"))
+        XCTAssertTrue(script.contains("await fetch(location.href"))
+        XCTAssertTrue(script.contains("isAccessibleForFree"))
+    }
+
+    /// Server-side paywalls (WSJ) send only the preview, so comparing with
+    /// the served page finds nothing; these signals catch them instead.
+    func testExtractionScriptChecksServerSidePaywallSignals() {
+        let script = LocalArticleParser.extractionScript
+        XCTAssertTrue(script.contains("article:word_count"), "stated length in a meta tag")
+        XCTAssertTrue(script.contains("node.wordCount"), "stated length in JSON-LD")
+        XCTAssertTrue(script.contains("node.cssSelector"), "the gated section from hasPart markup")
+    }
+
     func testBlankFieldsBecomeNil() throws {
         let article = try parse([
             "ok": true, "title": "T", "byline": "", "siteName": "   ",

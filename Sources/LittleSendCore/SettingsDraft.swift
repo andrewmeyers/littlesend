@@ -47,6 +47,9 @@ public struct SettingsDraft: Equatable, Sendable {
     public var browserSource: BrowserSource
     /// Whether the app's icon appears in the Dock, the menu bar, or both.
     public var iconPlacement: IconPlacement
+    /// Which reader turns a web page into an article.
+    public var articleReader: ArticleReader
+    public var instaparserAPIKey: String
 
     public init(
         kindleAddress: String = "",
@@ -72,7 +75,9 @@ public struct SettingsDraft: Equatable, Sendable {
         optimizeCoverForEInk: Bool = true,
         playSounds: Bool = true,
         browserSource: BrowserSource = .off,
-        iconPlacement: IconPlacement = .both
+        iconPlacement: IconPlacement = .both,
+        articleReader: ArticleReader = .local,
+        instaparserAPIKey: String = ""
     ) {
         self.kindleAddress = kindleAddress
         self.fromAddress = fromAddress
@@ -98,6 +103,8 @@ public struct SettingsDraft: Equatable, Sendable {
         self.playSounds = playSounds
         self.browserSource = browserSource
         self.iconPlacement = iconPlacement
+        self.articleReader = articleReader
+        self.instaparserAPIKey = instaparserAPIKey
     }
 
     public var coverStyle: CoverStyle {
@@ -210,6 +217,7 @@ public struct SettingsDraft: Equatable, Sendable {
         copy.smtpUsername = Self.trim(smtpUsername)
         copy.coverFontFamily = Self.trim(coverFontFamily)
         copy.smtpPassword = Self.normalizeAppPassword(smtpPassword)
+        copy.instaparserAPIKey = Self.trim(instaparserAPIKey)
 
         // Trim and case-insensitively dedupe the address book, keeping the
         // first-seen spelling and order so formatting alone never registers
@@ -256,6 +264,13 @@ public struct SettingsDraft: Equatable, Sendable {
             if draft.smtpUsername.isEmpty { problems.append("SMTP username is missing.") }
             if draft.smtpPassword.isEmpty { problems.append("SMTP password is missing.") }
         }
+
+        // Sends still work without one — they fall back to the built-in
+        // reader — but choosing Instaparser and then never reaching it is
+        // worth pointing out.
+        if draft.articleReader == .instaparser, draft.instaparserAPIKey.isEmpty {
+            problems.append("Instaparser API key is missing.")
+        }
         return problems
     }
 
@@ -289,7 +304,9 @@ public struct SettingsDraft: Equatable, Sendable {
             imageSizeLimitBytes: draft.limitImageSize
                 ? max(1, draft.maxImageKilobytes) * 1024
                 : nil,
-            coverStyle: draft.coverStyle
+            coverStyle: draft.coverStyle,
+            articleReader: draft.articleReader,
+            instaparserAPIKey: draft.instaparserAPIKey
         )
     }
 

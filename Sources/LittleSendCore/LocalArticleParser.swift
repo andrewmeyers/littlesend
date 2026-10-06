@@ -73,6 +73,10 @@ public final class LocalArticleParser: NSObject {
         let script = try Self.readabilitySource()
 
         let configuration = WKWebViewConfiguration()
+        // The app's shared, persistent store: sign-ins made in the app's
+        // "Sign In to Sites" window live here, so a subscriber's reads get the
+        // full article. A non-persistent store would quietly lose them.
+        configuration.websiteDataStore = .default()
         let webView = WKWebView(frame: .init(x: 0, y: 0, width: 1280, height: 900), configuration: configuration)
         webView.navigationDelegate = self
         self.webView = webView
@@ -117,6 +121,7 @@ public final class LocalArticleParser: NSObject {
             guard !fingerprint.isEmpty, fingerprints.insert(fingerprint).inserted else { break }
 
             pages.append(page.article.html)
+            if page.article.isPreview { article.isPreview = true }
             candidates = page.candidates
             expected += 1
         }
@@ -149,7 +154,10 @@ public final class LocalArticleParser: NSObject {
         try? await Task.sleep(nanoseconds: UInt64(settle * 1_000_000_000))
 
         _ = try? await webView.evaluateJavaScript(script)
-        let raw = try await webView.evaluateJavaScript(Self.extractionScript)
+        // The async form, so the script can await the paywall check's fetch.
+        let raw = try await webView.callAsyncJavaScript(
+            Self.extractionScript, arguments: [:], in: nil, contentWorld: .page
+        )
 
         guard let json = raw as? String, let data = json.data(using: .utf8) else {
             throw Failure.unreadableResult("not a string")
@@ -217,8 +225,21 @@ public final class LocalArticleParser: NSObject {
     ///
     /// Only same-site links containing a digit are collected: a page marker is
     /// always a number, and a long article can carry hundreds of other links.
+    ///
+    /// A page that labels itself paywalled (schema.org `isAccessibleForFree`,
+    /// which publishers set so search engines may index the full text) is
+    /// checked for being a preview, two ways:
+    /// - Held back on the server (WSJ): the page's stated word count, or its
+    ///   gated section (`hasPart` + `cssSelector`), shows far more than arrived.
+    /// - Trimmed in the browser (The Verge): the page as the server sent it is
+    ///   fetched again and read too, purely to compare lengths.
+    /// Only the visible article is ever returned — the point is to say "only a
+    /// preview came through", not to get around the paywall. A signed-in
+    /// subscriber gets the full article, so no warning.
+    ///
+    /// Run with `callAsyncJavaScript`, so it is a function body: it `return`s
+    /// its result and may `await`.
     static let extractionScript = """
-    (function () {
       try {
         if (typeof Readability === "undefined") {
           return JSON.stringify({ ok: false, reason: "Readability did not load" });
@@ -244,6 +265,68 @@ public final class LocalArticleParser: NSObject {
 
         var article = new Readability(document.cloneNode(true)).parse();
         if (!article) return JSON.stringify({ ok: false, reason: "no article" });
+
+        // What the page says about itself: whether it is paywalled, which
+        // part is gated (Google's `hasPart` markup), and how long it really is.
+        var markedPaywalled = false, gatedSelectors = [], declaredWords = 0;
+        var isFalse = function (value) {
+          return value === false || (typeof value === "string" && value.toLowerCase() === "false");
+        };
+        var visit = function (node) {
+          if (!node || typeof node !== "object") return;
+          if (Array.isArray(node)) { node.forEach(visit); return; }
+          if (isFalse(node.isAccessibleForFree)) {
+            markedPaywalled = true;
+            if (typeof node.cssSelector === "string") gatedSelectors.push(node.cssSelector);
+          }
+          var count = parseInt(node.wordCount, 10);
+          if (count > declaredWords) declaredWords = count;
+          Object.keys(node).forEach(function (key) { visit(node[key]); });
+        };
+        document.querySelectorAll('script[type="application/ld+json"]').forEach(function (element) {
+          try { visit(JSON.parse(element.textContent)); } catch (ignored) {}
+        });
+        var wordMeta = document.querySelector('meta[name="article:word_count"], meta[property="article:word_count"]');
+        if (wordMeta) declaredWords = Math.max(declaredWords, parseInt(wordMeta.content, 10) || 0);
+
+        var words = function (text) { return (text || "").split(/\\s+/).filter(Boolean).length; };
+        var shown = words(article.textContent);
+        // Clearly shorter, not just missing a caption or two.
+        var muchShorter = function (whole) { return whole - shown > 150 && shown < whole * 0.7; };
+
+        var preview = false;
+        if (markedPaywalled) {
+          if (declaredWords > 0) {
+            // Held back on the server (the WSJ way): the page states its
+            // length, and far less than that arrived.
+            preview = muchShorter(declaredWords);
+          } else if (gatedSelectors.length > 0) {
+            // No stated length: the gated section is missing or near empty.
+            var gatedWords = 0;
+            gatedSelectors.forEach(function (selector) {
+              try {
+                document.querySelectorAll(selector).forEach(function (element) {
+                  gatedWords += words(element.textContent);
+                });
+              } catch (ignored) {}
+            });
+            preview = gatedWords < 50;
+          }
+
+          if (!preview) {
+            // Trimmed in the browser (the Verge way): the page as the server
+            // sent it is longer than what is on screen.
+            try {
+              var response = await fetch(location.href, { credentials: "include" });
+              if (response.ok) {
+                var served = new DOMParser().parseFromString(await response.text(), "text/html");
+                var full = new Readability(served).parse();
+                preview = muchShorter(full ? words(full.textContent) : 0);
+              }
+            } catch (ignored) {}
+          }
+        }
+
         return JSON.stringify({
           ok: true,
           title: article.title || "",
@@ -254,12 +337,12 @@ public final class LocalArticleParser: NSObject {
           publishedTime: article.publishedTime || "",
           url: location.href,
           relNext: relNext,
-          anchors: anchors
+          anchors: anchors,
+          preview: preview
         });
       } catch (error) {
         return JSON.stringify({ ok: false, reason: String(error) });
       }
-    })()
     """
 
     /// Maps Readability's output onto a `ParsedArticle`.
@@ -294,7 +377,8 @@ public final class LocalArticleParser: NSObject {
             author: nonEmpty(object["byline"]),
             description: nonEmpty(object["excerpt"]),
             html: html,
-            publishedDate: nonEmpty(object["publishedTime"]).flatMap(Self.parseDate)
+            publishedDate: nonEmpty(object["publishedTime"]).flatMap(Self.parseDate),
+            isPreview: (object["preview"] as? Bool) ?? false
         )
     }
 

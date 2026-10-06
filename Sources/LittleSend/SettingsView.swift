@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var preferences: Preferences
 
     @State private var draft = SettingsDraft()
+    @State private var signedOut = false
     @State private var status: Status?
     @State private var selectedAddress: String?
     @State private var newAddressText = ""
@@ -142,7 +143,7 @@ struct SettingsView: View {
 
             Section {
                 Label(
-                    "The mail password is saved in this app's preferences file in plain text, not the Keychain.",
+                    "The mail password and Instaparser API key are saved in this app's preferences file in plain text, not the Keychain.",
                     systemImage: "info.circle"
                 )
                 .font(.appLabel)
@@ -214,6 +215,41 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
+            Section("Reading articles") {
+                Picker("Read articles with", selection: $draft.articleReader) {
+                    ForEach(ArticleReader.allCases, id: \.self) { reader in
+                        Text(reader.displayName).tag(reader)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+
+                if draft.articleReader == .instaparser {
+                    SecureField("Instaparser API key", text: $draft.instaparserAPIKey)
+                    Link("Get a free API key", destination: URL(string: "https://www.instaparser.com")!)
+                        .font(.appLabel)
+                }
+
+                Text(readerNote)
+                    .font(.appLabel)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Paywalls") {
+                HStack {
+                    Button("Sign In to a Site…") { SiteSignInWindow.shared.show() }
+                    Spacer()
+                    Button("Sign Out of All Sites") {
+                        Task {
+                            await SiteSignInWindow.signOutOfAllSites()
+                            signedOut = true
+                        }
+                    }
+                }
+                Text(signedOut ? "Signed out of all sites." : "Pay for a site? Sign in here once to get full articles. LittleSend can't use Safari's sign-ins.")
+                    .font(.appLabel)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("App icon") {
                 Picker("Show LittleSend in", selection: $draft.iconPlacement) {
                     ForEach(IconPlacement.allCases, id: \.self) { placement in
@@ -299,6 +335,15 @@ struct SettingsView: View {
     /// The actual system table type, not a hand-rolled list — add/remove sit
     /// in a toolbar below it, the standard macOS pattern for an editable
     /// address book (Login Items, Mail's blocked-senders list, and so on).
+    private var readerNote: String {
+        switch draft.articleReader {
+        case .local:
+            return "Reads articles on this Mac. It's free and private, and it reads every page of long articles."
+        case .instaparser:
+            return "Much faster, usually under a second. The free plan covers 1,000 articles a month. Instaparser sees each link you send. If it can't read one, LittleSend reads it on this Mac instead."
+        }
+    }
+
     private var emailAddressTable: some View {
         Table(draft.emailRecipients.map(AddressRow.init), selection: $selectedAddress) {
             TableColumn("Address") { row in

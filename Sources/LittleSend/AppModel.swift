@@ -271,6 +271,8 @@ final class AppModel: ObservableObject {
         }
         if outcome.pageCount > 1 { notes.append("\(outcome.pageCount) pages") }
         if outcome.usedTextFallback { notes.append("text-only fallback") }
+        if outcome.readerNote != nil { notes.append("read on this Mac") }
+        if outcome.isPreview { notes.append("paywall: part only") }
 
         let partialFailures = outcome.failures
         history.insert(
@@ -295,10 +297,11 @@ final class AppModel: ObservableObject {
                 kind: .warning,
                 message: "\(failure.kind.rawValue) delivery failed: \(failure.errorMessage ?? "unknown error")"
             )
-        } else if outcome.usedFallbackFont {
+        } else if !warnings(for: outcome).isEmpty {
+            // Delivered, but not quite as asked: worth saying out loud.
             banner = Banner(
                 kind: .warning,
-                message: "Sent, but the cover font was not found — the cover used Georgia."
+                message: (["Sent."] + warnings(for: outcome)).joined(separator: " ")
             )
         } else {
             banner = Banner(
@@ -317,6 +320,22 @@ final class AppModel: ObservableObject {
         let clean = partialFailures.isEmpty
         activity = clean ? .succeeded : .failed
         playSound(clean ? .success : .failure)
+    }
+
+    /// What went less than right in a send that still got through.
+    private func warnings(for outcome: SendOutcome) -> [String] {
+        var warnings: [String] = []
+        if outcome.isPreview {
+            // A paywall's preview was all the reader could see, and that is
+            // what was sent. Saying so beats a short book that looks complete.
+            let site = outcome.siteName ?? "This site"
+            warnings.append("Only part of it came through. \(site) has a paywall.")
+            warnings.append("Subscribers can sign in under Settings → General.")
+        }
+        // Instaparser was chosen but not used — often a key or quota to fix.
+        if let note = outcome.readerNote { warnings.append(note) }
+        if outcome.usedFallbackFont { warnings.append("The cover font was missing, so it used Georgia.") }
+        return warnings
     }
 
     /// "your Kindle and 2 recipients", for the banner and the history row.

@@ -39,10 +39,26 @@ xcrun actool "$PWD/Support/LittleSend.icon" \
 rm -rf "$ICON_TMP"
 echo "Compiled app icon"
 
-# Ad-hoc signature: enough for a personal build, and it gives the app a stable
-# identity so the Keychain stops re-prompting on every launch.
-codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 \
-    || echo "warning: could not codesign; the Keychain may prompt on each launch"
+# Sign with a real certificate when there is one. Its identity (team and
+# bundle ID) stays the same from build to build, so a keychain "Always Allow" —
+# for WebKit's "LittleSend WebCrypto Master Key", say — sticks. An ad-hoc
+# signature is tied to the exact bytes of this build, so every rebuild looks
+# like a new app to the keychain and it asks again.
+#
+# Override with SIGN_IDENTITY="…"; a free "Apple Development" certificate from
+# Xcode → Settings → Accounts is enough for this.
+SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -E '"(Developer ID Application|Apple Development)' | head -1 \
+    | sed -E 's/.*"(.*)"/\1/' || true)}"
+if [ -n "$SIGN_IDENTITY" ]; then
+    codesign --force --sign "$SIGN_IDENTITY" "$APP" >/dev/null 2>&1 \
+        && echo "Signed with $SIGN_IDENTITY" \
+        || echo "warning: could not sign with $SIGN_IDENTITY"
+else
+    codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 \
+        && echo "Signed ad hoc — keychain prompts will return after each rebuild" \
+        || echo "warning: could not codesign"
+fi
 
 echo "Built $APP"
 echo "Run it with:  open $APP"
