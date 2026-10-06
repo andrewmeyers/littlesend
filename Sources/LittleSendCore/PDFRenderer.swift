@@ -29,9 +29,9 @@ public final class PDFRenderer: NSObject {
 
         public var errorDescription: String? {
             switch self {
-            case .loadFailed(let reason): return "Could not lay out the PDF: \(reason)"
-            case .timedOut: return "Timed out laying out the PDF."
-            case .printFailed: return "Could not write the PDF."
+            case .loadFailed(let reason): return "Couldn't make the PDF: \(reason)"
+            case .timedOut: return "Making the PDF took too long."
+            case .printFailed: return "Couldn't save the PDF."
             }
         }
     }

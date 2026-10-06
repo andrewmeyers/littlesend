@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image?.isTemplate = true
         item.button?.target = self
         item.button?.action = #selector(toggle)
-        item.button?.toolTip = "LittleSend — click to open, or drop a file to send to Kindle"
+        item.button?.toolTip = "Click to open. Drop a file to send it to Kindle."
 
         // Straight onto the button, now that we own it.
         item.button?.registerForDraggedTypes([.fileURL])

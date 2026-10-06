@@ -46,11 +46,11 @@ public struct InstaparserClient {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw InstaparserError(statusCode: nil, message: "Could not reach Instaparser: \(error.localizedDescription)")
+            throw InstaparserError(statusCode: nil, message: "Couldn't reach Instaparser. \(error.localizedDescription)")
         }
 
         guard let http = response as? HTTPURLResponse else {
-            throw InstaparserError(statusCode: nil, message: "Unexpected response from Instaparser.")
+            throw InstaparserError(statusCode: nil, message: "Instaparser sent back something unexpected.")
         }
         guard http.statusCode == 200 else {
             throw InstaparserError(statusCode: http.statusCode, message: Self.describe(status: http.statusCode, body: data))
@@ -61,12 +61,12 @@ public struct InstaparserClient {
 
     static func decode(data: Data, requestedURL: URL) throws -> ParsedArticle {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw InstaparserError(statusCode: 200, message: "Instaparser returned a response that could not be read.")
+            throw InstaparserError(statusCode: 200, message: "Instaparser sent back something LittleSend couldn't read.")
         }
 
         let html = (object["html"] as? String) ?? (object["text"] as? String) ?? ""
         guard !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw InstaparserError(statusCode: 200, message: "Instaparser found no article text on that page.")
+            throw InstaparserError(statusCode: 200, message: "Instaparser found no article on that page.")
         }
 
         var publishedDate: Date?
@@ -109,14 +109,14 @@ public struct InstaparserClient {
 
         let base: String
         switch status {
-        case 400: base = "Instaparser rejected the request (bad URL?)."
-        case 401: base = "Instaparser rejected the API key. Check it in Settings."
-        case 403: base = "This Instaparser account is suspended."
-        case 409: base = "Instaparser monthly quota exceeded."
-        case 412: base = "Instaparser could not extract an article from that page."
-        case 429: base = "Instaparser rate limit reached. Try again in a moment."
-        case 500...599: base = "Instaparser is having trouble (HTTP \(status)). Try again shortly."
-        default: base = "Instaparser returned HTTP \(status)."
+        case 400: base = "Instaparser couldn't use that link."
+        case 401: base = "Instaparser didn't accept your API key. Check it in Settings."
+        case 403: base = "Your Instaparser account is suspended."
+        case 409: base = "You've used this month's Instaparser articles."
+        case 412: base = "Instaparser couldn't read that page."
+        case 429: base = "Too many requests to Instaparser. Try again in a moment."
+        case 500...599: base = "Instaparser is having trouble. Try again soon."
+        default: base = "Instaparser had an error (HTTP \(status))."
         }
         if let detail, !detail.isEmpty { return "\(base) (\(detail))" }
         return base

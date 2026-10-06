@@ -25,7 +25,7 @@ struct SettingsView: View {
     private var coverFontWarning: String? {
         let chosen = draft.coverFontFamily.trimmingCharacters(in: .whitespaces)
         guard !chosen.isEmpty, !CoverFont.isAvailable(family: chosen) else { return nil }
-        return "\(chosen) is not installed — covers will use Georgia instead."
+        return "\(chosen) isn't installed, so covers will use Georgia."
     }
 
     /// Nothing to save until something actually differs from what is stored.
@@ -69,7 +69,7 @@ struct SettingsView: View {
         Form {
             Section("Kindle") {
                 TextField("Send to Kindle address", text: $draft.kindleAddress)
-                Text("Found under Manage Your Content and Devices → Preferences → Personal Document Settings. Whether Kindle is actually sent to is chosen in the menu bar, not here.")
+                Text("Find it on Amazon under Manage Your Content and Devices → Preferences → Personal Document Settings.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
@@ -104,13 +104,13 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
 
-                Text("This is the address book the menu bar's Email picker draws from — adding one here doesn't send anything by itself. Which addresses actually receive a send, and whether Kindle or Email are on at all, is chosen from the menu bar.")
+                Text("Your address book. Pick who gets each send in the panel.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
 
             Section("Email messages") {
-                Toggle("Embed images in the message", isOn: $draft.embedImagesInEmail)
+                Toggle("Show images in the email", isOn: $draft.embedImagesInEmail)
                     .disabled(draft.emailRecipients.isEmpty)
 
                 Toggle("Also attach the EPUB", isOn: $draft.attachBookToEmail)
@@ -126,7 +126,7 @@ struct SettingsView: View {
         Form {
             Section("Sender") {
                 TextField("From address", text: $draft.fromAddress)
-                Text("This address must be on your Approved Personal Document E-mail List, or Amazon silently drops the message.")
+                Text("Add this address to your Approved Personal Document E-mail List on Amazon. If you don't, Amazon drops your sends.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
@@ -136,14 +136,14 @@ struct SettingsView: View {
                 TextField("Port", value: $draft.smtpPort, format: .number.grouping(.never))
                 TextField("Username", text: $draft.smtpUsername)
                 SecureField("Password", text: $draft.smtpPassword)
-                Text("Gmail requires an app password with 2-Step Verification on. The connection is TLS from the first byte, so use an implicit-TLS port such as 465.")
+                Text("For Gmail, turn on 2-Step Verification and use an app password. Use port 465.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
 
             Section {
                 Label(
-                    "The mail password and Instaparser API key are saved in this app's preferences file in plain text, not the Keychain.",
+                    "Your mail password and Instaparser key are saved as plain text in LittleSend's settings, not in the Keychain.",
                     systemImage: "info.circle"
                 )
                 .font(.appLabel)
@@ -185,7 +185,7 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
 
-                Text("The cover is drawn here and sent as an image, so any font on this Mac works — nothing has to exist on the Kindle. The article text carries no fonts at all and follows your Kindle's own font settings.")
+                Text("Any font on this Mac works for the cover. The article uses your Kindle's own font settings.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
@@ -203,7 +203,7 @@ struct SettingsView: View {
 
                 Toggle("Optimize Kindle covers for e-ink", isOn: $draft.optimizeCoverForEInk)
 
-                Text("Kindle gets a dark-on-paper cover in the panel's own 16 grey levels. Desktop and email keep the colour version, since those are read on colour screens. Nothing detects your device, so pick the size yourself.")
+                Text("Kindle covers use the 16 grays an e-ink screen can show. Desktop and email covers stay in color. Pick the size that fits your Kindle.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
@@ -258,32 +258,32 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
 
-                Text("With the menu bar icon, click it or drop a file on it to open LittleSend. With the Dock icon, click it — and LittleSend's own menus appear in the menu bar while it is in use. Menu bar only keeps it out of the Dock and the ⌘Tab switcher, which also means no LittleSend menus at the top of the screen.")
+                Text("Menu bar only keeps LittleSend out of the Dock and ⌘Tab, but its menus won't show at the top of the screen.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
 
             Section("When the panel opens") {
-                Picker("Fill the URL from", selection: $draft.browserSource) {
+                Picker("Fill the link from", selection: $draft.browserSource) {
                     ForEach(BrowserSource.allCases, id: \.self) { source in
                         Text(source.displayName).tag(source)
                     }
                 }
 
-                Text("Reading a browser tab needs macOS Automation permission — the first attempt asks, and the answer is remembered under System Settings → Privacy & Security → Automation. Only browsers already running are asked, so this never opens one. The clipboard is used when the browser has nothing to offer.")
+                Text("macOS asks once before LittleSend can read your browser. If no page is open, LittleSend uses the clipboard.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
 
             Section("Feedback") {
                 Toggle("Play sounds", isOn: $draft.playSounds)
-                Text("A soft chime when a send lands, and a low one if it didn't.")
+                Text("A chime when a send works, and a low tone if it fails.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
 
             Section("Images") {
-                Toggle("Embed images in the EPUB", isOn: $draft.embedImages)
+                Toggle("Include images in the EPUB", isOn: $draft.embedImages)
 
                 Toggle("Shrink large images", isOn: $draft.limitImageSize)
                     .disabled(!draft.embedImages)
@@ -303,7 +303,7 @@ struct SettingsView: View {
                 }
                 .disabled(!draft.embedImages || !draft.limitImageSize)
 
-                Text("Images above this are re-encoded to fit — quality first, then resolution. Each one links back to the full-resolution original. Only affects the EPUB; emailed articles reference images at their source.")
+                Text("Bigger images are shrunk to fit. Each one links to the full-size original. This only affects the EPUB.")
                     .font(.appLabel)
                     .foregroundStyle(.secondary)
             }
@@ -340,7 +340,7 @@ struct SettingsView: View {
         case .local:
             return "Reads articles on this Mac. It's free and private, and it reads every page of long articles."
         case .instaparser:
-            return "Much faster, usually under a second. The free plan covers 1,000 articles a month. Instaparser sees each link you send. If it can't read one, LittleSend reads it on this Mac instead."
+            return "Much faster, usually under a second. Free for 1,000 articles a month. Instaparser sees each link you send. If it can't read one, LittleSend reads it on this Mac."
         }
     }
 

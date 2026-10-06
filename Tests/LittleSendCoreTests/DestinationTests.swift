@@ -78,7 +78,7 @@ final class DestinationValidationTests: XCTestCase {
 
     func testNoDestinationIsRejected() {
         let problems = configuration(kindle: false, recipients: []).validationProblems
-        XCTAssertTrue(problems.contains { $0.contains("No destination") })
+        XCTAssertTrue(problems.contains { $0.contains("Pick where to send it") })
     }
 
     func testMalformedRecipientIsNamed() {
@@ -538,12 +538,12 @@ final class DestinationToggleTests: XCTestCase {
 
     func testBothDestinationsOffIsInvalid() {
         XCTAssertTrue(
-            draft(kindle: false, email: false).validationProblems.contains { $0.contains("No destination") }
+            draft(kindle: false, email: false).validationProblems.contains { $0.contains("Pick where to send it") }
         )
         // Same net effect, reached by deselecting every recipient instead.
         XCTAssertTrue(
             draft(kindle: false, excluded: ["a@x.com", "b@x.com"]).validationProblems
-                .contains { $0.contains("No destination") }
+                .contains { $0.contains("Pick where to send it") }
         )
     }
 
@@ -571,7 +571,7 @@ final class DestinationToggleTests: XCTestCase {
 
     func testNoConfiguredRecipientsIsNotADestination() {
         let empty = draft(kindle: false, recipients: "")
-        XCTAssertTrue(empty.validationProblems.contains { $0.contains("No destination") })
+        XCTAssertTrue(empty.validationProblems.contains { $0.contains("Pick where to send it") })
         XCTAssertFalse(empty.configuration.needsBook)
     }
 }

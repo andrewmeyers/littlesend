@@ -21,7 +21,7 @@ final class ConfigurationTests: XCTestCase {
     func testEachMissingFieldIsReported() {
         XCTAssertTrue(configuration(kindle: "not-an-email").validationProblems.contains { $0.contains("Kindle") })
         XCTAssertTrue(configuration(from: "").validationProblems.contains { $0.contains("Sender") })
-        XCTAssertTrue(configuration(host: "").validationProblems.contains { $0.contains("SMTP server") })
+        XCTAssertTrue(configuration(host: "").validationProblems.contains { $0.contains("Mail server") })
         XCTAssertTrue(configuration(password: "").validationProblems.contains { $0.contains("password") })
     }
 

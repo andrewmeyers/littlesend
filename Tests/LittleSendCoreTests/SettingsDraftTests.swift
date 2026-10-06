@@ -146,8 +146,8 @@ final class SettingsCompletenessTests: XCTestCase {
     func testNeverComplainsAboutDestinationSelection() {
         // The send-time gate still does; Settings must not.
         let empty = draft()
-        XCTAssertFalse(empty.settingsProblems.contains { $0.contains("destination") })
-        XCTAssertTrue(empty.validationProblems.contains { $0.contains("destination") })
+        XCTAssertFalse(empty.settingsProblems.contains { $0.contains("where to send") })
+        XCTAssertTrue(empty.validationProblems.contains { $0.contains("where to send") })
     }
 
     // MARK: - What it does still catch

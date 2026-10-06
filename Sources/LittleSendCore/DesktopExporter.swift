@@ -21,9 +21,9 @@ public struct DesktopExporter {
         public var errorDescription: String? {
             switch self {
             case .noDestinationFolder:
-                return "Could not find the Desktop folder."
+                return "Couldn't find your Desktop folder."
             case .couldNotWrite(let reason):
-                return "Could not save to the Desktop: \(reason)"
+                return "Couldn't save to your Desktop: \(reason)"
             }
         }
     }

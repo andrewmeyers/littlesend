@@ -31,15 +31,15 @@ public final class LocalArticleParser: NSObject {
         public var errorDescription: String? {
             switch self {
             case .readabilityUnavailable:
-                return "The local reader is missing its Readability script."
+                return "LittleSend is missing a file it needs. Reinstall it."
             case .navigationFailed(let reason):
-                return "The local reader could not load the page: \(reason)"
+                return "Couldn't load the page: \(reason)"
             case .timedOut:
-                return "The local reader timed out loading the page."
+                return "The page took too long to load."
             case .noArticleFound:
-                return "The local reader could not find an article on that page."
+                return "Couldn't find an article on that page."
             case .unreadableResult(let reason):
-                return "The local reader returned something unusable: \(reason)"
+                return "Couldn't read the page: \(reason)"
             }
         }
     }

@@ -36,7 +36,7 @@ struct MenuContentView: View {
                     // whereas plain Return would send on the same keystroke
                     // that pressed Next a moment ago.
                     shortcut: KeyboardShortcut(.return, modifiers: .command),
-                    help: destinationLabel == nil ? "Choose at least one destination" : "Send (⌘Return)",
+                    help: destinationLabel == nil ? "Pick where to send it" : "Send (⌘Return)",
                     reportsSide: Binding(
                         get: { CGFloat(squareSide) },
                         set: { squareSide = Double($0) }
@@ -191,7 +191,7 @@ struct MenuContentView: View {
         }
         .buttonStyle(.plain)
         .disabled(model.isSending)
-        .help("Choose a file to send to Kindle — or drop one here, or on the menu bar icon")
+        .help("Choose a file for your Kindle, or drop one here")
     }
 
     private var emptyDropZone: some View {
@@ -206,7 +206,7 @@ struct MenuContentView: View {
                     Text("Drop a file here")
                 }
                 .font(.appLabel.weight(.medium))
-                Text("or click to choose — goes to Kindle")
+                Text("or click to choose. Kindle only.")
                     .font(.appHint)
                     .foregroundStyle(.tertiary)
             }
@@ -228,7 +228,7 @@ struct MenuContentView: View {
         .buttonStyle(.plain)
         .disabled(model.isSending)
         .opacity(hasTypedURL ? 0.4 : 1)
-        .help("Choose a file to send to Kindle — or drop one here, or on the menu bar icon")
+        .help("Choose a file for your Kindle, or drop one here")
     }
 
     /// True once something has been typed in the URL field, which is what makes
@@ -258,7 +258,7 @@ struct MenuContentView: View {
             }
             .buttonStyle(.borderless)
             .disabled(model.isSending)
-            .help("Use the address of the front browser tab")
+            .help("Use the link from your browser")
 
             Button {
                 model.urlText = ""
@@ -268,7 +268,7 @@ struct MenuContentView: View {
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(.borderless)
-            .help("Paste the link from the clipboard")
+            .help("Paste a link")
         }
     }
 
@@ -333,7 +333,7 @@ struct MenuContentView: View {
     private func advanceFromSource() {
         guard hasInput else { return }
         if !fileStaged, AppModel.normalizedURL(from: model.urlText) == nil {
-            model.banner = AppModel.Banner(kind: .failure, message: "That does not look like a web address.")
+            model.banner = AppModel.Banner(kind: .failure, message: "That isn't a web address.")
             return
         }
         model.banner = nil
@@ -371,7 +371,7 @@ struct MenuContentView: View {
             }
             .buttonStyle(.plain)
             .disabled(model.isSending)
-            .help("Edit the address")
+            .help("Edit the link")
         }
     }
 
@@ -419,7 +419,7 @@ struct MenuContentView: View {
             // offered — not three chips with two of them greyed out.
             HStack(spacing: 8) {
                 kindleChip(draft: draft)
-                Text("Files can only be sent to Kindle.")
+                Text("Files go to Kindle only.")
                     .font(.appHint)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
@@ -471,7 +471,7 @@ struct MenuContentView: View {
             enabled: true,
             help: "Save a \(preferences.desktopFormat.displayName) copy to your Desktop",
             action: { preferences.update { $0.saveToDesktop.toggle() } },
-            optionsHelp: "Choose the format to save in"
+            optionsHelp: "Choose a format"
         ) {
             // A radio group in the popover, which is a real SwiftUI view and
             // so shows the current choice live — unlike a menu.
@@ -507,7 +507,7 @@ struct MenuContentView: View {
             enabled: draft.canSendToEmail,
             help: emailChipHelp,
             action: { preferences.update { $0.sendToEmail.toggle() } },
-            optionsHelp: "Choose which addresses receive it"
+            optionsHelp: "Choose who gets it"
         ) {
             // Plain SwiftUI toggles in a popover, which re-render when the
             // state behind them changes — the thing a macOS menu would not do.
@@ -538,11 +538,11 @@ struct MenuContentView: View {
     }
 
     private var emailChipHelp: String {
-        guard preferences.draft.canSendToEmail else { return "Add email recipients in Settings" }
-        guard preferences.sendToEmail else { return "Click to email this article. Use the arrow to choose recipients." }
+        guard preferences.draft.canSendToEmail else { return "Add email addresses in Settings" }
+        guard preferences.sendToEmail else { return "Click to email it. Use the arrow to pick who gets it." }
         let selected = preferences.draft.selectedEmailRecipients
-        guard !selected.isEmpty else { return "On, but no recipients are checked — use the arrow to pick who" }
-        return "Email the article to \(selected.joined(separator: ", ")). Click to turn off."
+        guard !selected.isEmpty else { return "No one is checked. Use the arrow to pick who gets it." }
+        return "Emails it to \(selected.joined(separator: ", ")). Click to turn off."
     }
 
     private func bannerView(_ banner: AppModel.Banner) -> some View {
@@ -632,7 +632,7 @@ struct MenuContentView: View {
                                 .font(.appHint)
                         }
                         .buttonStyle(.borderless)
-                        .help("Show the files for this send in Finder")
+                        .help("Show in Finder")
                     }
                 }
             }

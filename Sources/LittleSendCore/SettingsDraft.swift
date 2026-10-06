@@ -248,21 +248,21 @@ public struct SettingsDraft: Equatable, Sendable {
         var problems: [String] = []
 
         if !draft.kindleAddress.isEmpty, !SendConfiguration.looksLikeEmail(draft.kindleAddress) {
-            problems.append("Kindle address is malformed.")
+            problems.append("Kindle address isn't valid.")
         }
         for address in draft.emailAddresses where !SendConfiguration.looksLikeEmail(address) {
-            problems.append("Email address “\(address)” is malformed.")
+            problems.append("“\(address)” isn't a valid email address.")
         }
 
         // Mail credentials only matter once a mail destination is configured.
         // Someone who only saves to the Desktop needs no SMTP at all.
         if !draft.kindleAddress.isEmpty || !draft.emailAddresses.isEmpty {
             if !SendConfiguration.looksLikeEmail(draft.fromAddress) {
-                problems.append("Sender address is missing or malformed.")
+                problems.append("Sender address is missing or not valid.")
             }
-            if draft.smtpHost.isEmpty { problems.append("SMTP server is missing.") }
-            if draft.smtpUsername.isEmpty { problems.append("SMTP username is missing.") }
-            if draft.smtpPassword.isEmpty { problems.append("SMTP password is missing.") }
+            if draft.smtpHost.isEmpty { problems.append("Mail server is missing.") }
+            if draft.smtpUsername.isEmpty { problems.append("Mail username is missing.") }
+            if draft.smtpPassword.isEmpty { problems.append("Mail password is missing.") }
         }
 
         // Sends still work without one — they fall back to the built-in

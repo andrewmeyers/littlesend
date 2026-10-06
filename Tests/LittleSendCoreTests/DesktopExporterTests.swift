@@ -93,7 +93,7 @@ final class DesktopDestinationTests: XCTestCase {
     func testDesktopCountsAsADestination() {
         XCTAssertTrue(configuration(desktop: true).validationProblems.isEmpty)
         XCTAssertTrue(
-            configuration().validationProblems.contains { $0.contains("No destination") },
+            configuration().validationProblems.contains { $0.contains("Pick where to send it") },
             "nothing selected at all should still be rejected"
         )
     }
@@ -112,11 +112,11 @@ final class DesktopDestinationTests: XCTestCase {
     func testMailDestinationsStillRequireCredentials() {
         XCTAssertTrue(
             configuration(kindle: true, smtpPassword: "").validationProblems
-                .contains { $0.contains("SMTP password") }
+                .contains { $0.contains("Mail password") }
         )
         XCTAssertTrue(
             configuration(recipients: ["a@x.com"], smtpPassword: "").validationProblems
-                .contains { $0.contains("SMTP password") }
+                .contains { $0.contains("Mail password") }
         )
     }
 
