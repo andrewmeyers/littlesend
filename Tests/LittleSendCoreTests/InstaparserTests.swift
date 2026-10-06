@@ -141,3 +141,51 @@ final class ArticleReadingTests: XCTestCase {
         }
     }
 }
+
+final class ArticleReadingAttentionTests: XCTestCase {
+    private let url = URL(string: "https://example.com/post")!
+    private func article() -> ParsedArticle { ParsedArticle(url: url.absoluteString, title: "T", html: "<p>x</p>") }
+
+    private func fallback(status: Int?) async throws -> ArticleReading.Result {
+        try await ArticleReading.read(
+            url: url, reader: .instaparser, instaparserAPIKey: "key",
+            instaparser: { _, _ in
+                throw InstaparserError(statusCode: status, message: "Instaparser failed.")
+            },
+            local: { _ in self.article() }
+        )
+    }
+
+    /// Things the user can fix get a warning.
+    func testFixableFailuresNeedAttention() async throws {
+        for status in [401, 403, 409] {
+            let result = try await fallback(status: status)
+            XCTAssertTrue(result.needsAttention, "HTTP \(status)")
+            XCTAssertNotNil(result.note)
+        }
+        let noKey = try await ArticleReading.read(
+            url: url, reader: .instaparser, instaparserAPIKey: "",
+            instaparser: { _, _ in self.article() }, local: { _ in self.article() }
+        )
+        XCTAssertTrue(noKey.needsAttention)
+    }
+
+    /// A page Instaparser cannot read, a brief rate limit, an outage or a
+    /// dropped connection are noted in the history but do not warn.
+    func testUnfixableFailuresAreQuiet() async throws {
+        for status in [412, 429, 500, 503, nil] as [Int?] {
+            let result = try await fallback(status: status)
+            XCTAssertFalse(result.needsAttention, "HTTP \(String(describing: status))")
+            XCTAssertNotNil(result.note, "still recorded for the history")
+        }
+    }
+
+    func testSuccessNeedsNoAttention() async throws {
+        let result = try await ArticleReading.read(
+            url: url, reader: .instaparser, instaparserAPIKey: "key",
+            instaparser: { _, _ in self.article() }, local: { _ in self.article() }
+        )
+        XCTAssertFalse(result.needsAttention)
+        XCTAssertNil(result.note)
+    }
+}

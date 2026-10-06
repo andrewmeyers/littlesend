@@ -332,8 +332,9 @@ final class AppModel: ObservableObject {
             warnings.append("Only part of it came through. \(site) has a paywall.")
             warnings.append("Subscribers can sign in under Settings → General.")
         }
-        // Instaparser was chosen but not used — often a key or quota to fix.
-        if let note = outcome.readerNote { warnings.append(note) }
+        // Instaparser was chosen but not used. Only worth interrupting for
+        // when there is something to fix; "couldn't read this page" is not.
+        if outcome.readerNoteNeedsAttention, let note = outcome.readerNote { warnings.append(note) }
         if outcome.usedFallbackFont { warnings.append("The cover font was missing, so it used Georgia.") }
         return warnings
     }
