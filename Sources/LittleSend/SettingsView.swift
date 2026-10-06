@@ -158,19 +158,28 @@ struct SettingsView: View {
                 if !panes.isEmpty {
                     Section(group.title) {
                         ForEach(panes) { pane in
-                            Label {
-                                Text(pane.title)
-                            } icon: {
+                            // Laid out by hand to System Settings' measure: a
+                            // 20pt icon, a 7pt gap, rows about 32pt tall, and
+                            // the selected pane's name in semibold.
+                            HStack(spacing: 7) {
                                 PaneIcon(symbol: pane.symbol, tint: pane.tint)
+                                Text(pane.title)
+                                    .fontWeight(pane == self.pane.wrappedValue ? .semibold : .regular)
                             }
+                            .padding(.vertical, 1)
                             .tag(pane)
                         }
                     }
                 }
             }
         }
+        // Never the keyboard focus, so the selection stays the soft grey
+        // System Settings uses rather than the accent colour a focused list
+        // gets. Panes are picked by click or search.
+        .focusable(false)
         .searchable(text: $search, placement: .sidebar, prompt: "Search Settings")
-        .environment(\.sidebarRowSize, .large)
+        // Standard-size labels; the room between rows comes from padding.
+        .environment(\.sidebarRowSize, .medium)
         // Room for "Mail Account" and the search prompt at full length.
         .frame(minWidth: 220)
         .navigationSplitViewColumnWidth(220)
@@ -616,11 +625,11 @@ private struct PaneIcon: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 24, height: 24)
+            .frame(width: 20, height: 20)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 4.5, style: .continuous)
                     .fill(tint.gradient)
             )
     }
