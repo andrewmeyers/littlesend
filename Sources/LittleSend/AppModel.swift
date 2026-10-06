@@ -329,7 +329,7 @@ final class AppModel: ObservableObject {
             // what was sent. Saying so beats a short book that looks complete.
             let site = outcome.siteName ?? "This site"
             warnings.append("Only part of it came through. \(site) has a paywall.")
-            warnings.append("Subscribers can sign in under Settings → General.")
+            warnings.append("Subscribers can sign in under Settings → Reading.")
         }
         // Instaparser was chosen but not used. Only worth interrupting for
         // when there is something to fix; "couldn't read this page" is not.
