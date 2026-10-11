@@ -114,11 +114,12 @@ public enum SettingsCopy {
         public static let port = "Port"
         public static let username = "Username"
         public static let password = "Password"
-        public static let outgoingNote = "For Gmail, turn on 2-Step Verification and use an app password. Use port 465. The password is saved as plain text in LittleSend's settings, not in the Keychain."
+        public static let outgoingNote = "For Gmail, turn on 2-Step Verification and use an app password. Use port 465. Port 587 doesn't work yet. The password is saved as plain text in LittleSend's settings, not in the Keychain."
 
         static var all: [String] {
             [senderSection, fromAddress, fromAddressNote, outgoingSection, server, port,
              username, password, outgoingNote]
+                + MailProvider.allCases.map(\.displayName)
         }
     }
 

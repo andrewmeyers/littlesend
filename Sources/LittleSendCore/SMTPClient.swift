@@ -155,6 +155,18 @@ public final class SMTPClient {
         throw SMTPError(code: reply.code, message: "Mail server error at \(step) (\(reply.code)): \(reply.text)")
     }
 
+    /// Ports that start unencrypted and upgrade (STARTTLS) fail the moment
+    /// LittleSend opens an encrypted connection, with an error that says nothing
+    /// useful. Say what is going on instead.
+    static func portHint(for port: UInt16) -> String {
+        switch port {
+        case 587, 25, 2525:
+            return " Port \(port) starts unencrypted, which LittleSend can't use yet. Try port 465."
+        default:
+            return ""
+        }
+    }
+
     private func connect() async throws {
         guard let port = NWEndpoint.Port(rawValue: configuration.port) else {
             throw SMTPError(code: nil, message: "Port \(configuration.port) isn't valid.")
@@ -182,6 +194,7 @@ public final class SMTPClient {
                         continuation.resume(throwing: SMTPError(
                             code: nil,
                             message: "Couldn't connect to \(self.configuration.host):\(self.configuration.port). \(error.localizedDescription)"
+                                + Self.portHint(for: self.configuration.port)
                         ))
                     }
                 case .cancelled:

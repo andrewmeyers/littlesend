@@ -165,6 +165,31 @@ public struct SettingsDraft: Equatable, Sendable {
     /// Whether the Kindle destination can be switched on at all.
     public var canSendToKindle: Bool { SendConfiguration.looksLikeEmail(Self.trim(kindleAddress)) }
 
+    /// Whether the outgoing mail details are all filled in.
+    public var canSendMail: Bool {
+        SendConfiguration.looksLikeEmail(Self.trim(fromAddress))
+            && !Self.trim(smtpHost).isEmpty
+            && !Self.trim(smtpUsername).isEmpty
+            && !smtpPassword.isEmpty
+    }
+
+    /// Picks the destinations at the end of first-run setup, so the first Send
+    /// can work whatever was skipped.
+    ///
+    /// Kindle sending is on by default, and with no Kindle address — or no
+    /// way to mail one — every send is refused before it starts. So when
+    /// setup ends without both, Kindle goes off and a Desktop copy goes on.
+    /// With both, a first run switches Kindle on; running setup again later
+    /// leaves the person's own choice alone.
+    public mutating func chooseDestinationsAfterSetup(firstRun: Bool) {
+        if canSendToKindle && canSendMail {
+            if firstRun { sendToKindle = true }
+        } else {
+            sendToKindle = false
+            saveToDesktop = true
+        }
+    }
+
     /// Names of the destinations a send would actually reach right now —
     /// "Kindle", "Email", "Kindle and Email", or "" if nothing is active.
     /// Drives the "Send to" label so it reflects live selection rather than

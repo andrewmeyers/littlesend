@@ -62,6 +62,7 @@ private struct SetupView: View {
     @State private var draft = SettingsDraft()
     @State private var step: Step = .kindle
     @State private var copied = false
+    @State private var provider: MailProvider = .gmail
 
     enum Step: Int, CaseIterable {
         case kindle, mail, approve, reader, done
@@ -92,8 +93,23 @@ private struct SetupView: View {
         .frame(width: 560, height: 470)
         // Saved as typed, like Settings; the draft stays here so storing,
         // which trims, never rewrites the field mid-word.
-        .onAppear { draft = preferences.draft }
+        .onAppear {
+            draft = preferences.draft
+            provider = MailProvider.detect(host: draft.smtpHost)
+        }
         .onChange(of: draft) { _, edited in preferences.apply(edited) }
+        // Picking a provider fills in its server and port.
+        .onChange(of: provider) { _, chosen in
+            if chosen.isSupported, let server = chosen.server {
+                draft.smtpHost = server
+                draft.smtpPort = Int(chosen.port)
+            } else if chosen == .other, MailProvider.detect(host: draft.smtpHost) != .other {
+                // Leaving a preset for "another provider": start the server
+                // blank rather than showing the old provider's.
+                draft.smtpHost = ""
+                draft.smtpPort = 465
+            }
+        }
         // Opened from Settings, setup can sit beside it: take in anything
         // changed there, or the next keystroke here would put old values back.
         .onChange(of: preferences.draft) { _, stored in
@@ -138,41 +154,82 @@ private struct SetupView: View {
     private var mailStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             heading("envelope.fill", .teal, "Which email sends them?",
-                    "LittleSend sends from your own email, so Amazon knows it's you. Gmail works best.")
+                    "LittleSend sends from your own email, so Amazon knows it's you.")
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
-                    Text("Your email").gridColumnAlignment(.trailing)
-                    TextField("you@gmail.com", text: $draft.fromAddress)
-                }
-                GridRow {
-                    Text("App password")
-                    SecureField("16 letters", text: $draft.smtpPassword)
-                }
-                GridRow {
-                    Text("Mail server")
-                    HStack {
-                        TextField("smtp.gmail.com", text: $draft.smtpHost)
-                        Text("Port").foregroundStyle(.secondary)
-                        TextField("465", value: $draft.smtpPort, format: .number.grouping(.never))
-                            .frame(width: 56)
+                    Text("Provider").gridColumnAlignment(.trailing)
+                    Picker("Provider", selection: $provider) {
+                        ForEach(MailProvider.allCases) { each in
+                            Text(each.displayName).tag(each)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(maxWidth: 220, alignment: .leading)
                 }
-                GridRow {
-                    Text("Username")
-                    TextField("you@gmail.com", text: $draft.smtpUsername)
+
+                if provider.isSupported {
+                    GridRow {
+                        Text("Your email")
+                        TextField("you@example.com", text: $draft.fromAddress)
+                    }
+                    GridRow {
+                        Text("App password")
+                        SecureField("Paste it here", text: $draft.smtpPassword)
+                    }
+                    if provider == .other {
+                        GridRow {
+                            Text("Mail server")
+                            HStack {
+                                TextField("smtp.example.com", text: $draft.smtpHost)
+                                Text("Port").foregroundStyle(.secondary)
+                                TextField("465", value: $draft.smtpPort, format: .number.grouping(.never))
+                                    .frame(width: 56)
+                            }
+                        }
+                        GridRow {
+                            Text("Username")
+                            TextField("Usually your email", text: $draft.smtpUsername)
+                        }
+                    }
                 }
             }
             .textFieldStyle(.roundedBorder)
 
-            note("Gmail needs an app password, not your usual one. Turn on 2-Step Verification, then make an app password and paste it here.")
-            Link("Make a Gmail app password", destination: Self.gmailAppPasswords)
-                .font(.appLabel)
-
-            if !draft.fromAddress.isEmpty, !SendConfiguration.looksLikeEmail(draft.fromAddress) {
-                warning("That isn't a valid email address.")
+            if provider.isSupported {
+                note(provider.passwordNote)
+                if let title = provider.passwordGuideTitle, let guide = provider.passwordGuide {
+                    Link(title, destination: guide)
+                        .font(.appLabel)
+                }
+                if provider == .other, [587, 25, 2525].contains(draft.smtpPort) {
+                    warning("Port \(draft.smtpPort) doesn't work yet. Use 465 if your provider has it.")
+                }
+                if !draft.fromAddress.isEmpty, !SendConfiguration.looksLikeEmail(draft.fromAddress) {
+                    warning("That isn't a valid email address.")
+                }
+            } else {
+                unsupportedPanel
             }
         }
+    }
+
+    /// For iCloud and Outlook.com: say why, and give a way forward.
+    private var unsupportedPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(provider.unsupportedNote, systemImage: "info.circle.fill")
+                .font(.appBody)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Link("Make a free Gmail account", destination: MailProvider.freeGmailSignup)
+                Button("I Have One") { provider = .gmail }
+            }
+            note("Not now? Skip this. Articles will save to your Desktop until email is set up.")
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var approveStep: some View {
@@ -215,14 +272,12 @@ private struct SetupView: View {
     private var doneStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             heading("paperplane.fill", .blue, "You're all set",
-                    kindleValid
-                        ? "Copy a link, open LittleSend, and press Send."
-                        : "Articles will save to your Desktop. Add a Kindle or email addresses anytime in Settings.")
+                    finishSubtitle)
 
             VStack(alignment: .leading, spacing: 8) {
                 summaryRow("Kindle", kindleValid ? trimmed(draft.kindleAddress) : "Not set")
                 summaryRow("Sends from", mailReady ? trimmed(draft.fromAddress) : "Not set")
-                summaryRow("Desktop", draft.saveToDesktop ? "Saves a copy" : "Off")
+                summaryRow("Desktop", desktopOn ? "Saves a copy" : "Off")
                 summaryRow("Reader", draft.articleReader == .instaparser ? "Instaparser" : "Built-in reader")
             }
             .padding(14)
@@ -231,11 +286,12 @@ private struct SetupView: View {
 
             note("Change any of this later in Settings.")
         }
-        // With no Kindle there is nowhere to send to — no email addresses are
-        // added here — so a Desktop copy is the destination, or Send would
-        // have nothing to do on the very first try.
+        // What was skipped decides where sends go: with no Kindle, or no way
+        // to mail one, Kindle goes off and a Desktop copy goes on, or the very
+        // first Send would be refused. Applied here so Back and forward again
+        // re-decides from what is filled in now.
         .onAppear {
-            if !kindleValid { draft.saveToDesktop = true }
+            draft.chooseDestinationsAfterSetup(firstRun: !preferences.setupFinished)
         }
     }
 
@@ -287,10 +343,23 @@ private struct SetupView: View {
     }
 
     private var mailReady: Bool {
-        SendConfiguration.looksLikeEmail(trimmed(draft.fromAddress))
-            && !trimmed(draft.smtpHost).isEmpty
-            && !trimmed(draft.smtpUsername).isEmpty
-            && !trimmed(draft.smtpPassword).isEmpty
+        provider.isSupported && draft.canSendMail
+    }
+
+    /// Says only what is still missing.
+    private var finishSubtitle: String {
+        if canSendToKindle { return "Copy a link, open LittleSend, and press Send." }
+        if kindleValid { return "Articles will save to your Desktop. Add your email in Settings to send to your Kindle too." }
+        return "Articles will save to your Desktop. Add your Kindle and email in Settings to send there too."
+    }
+
+    /// What the finish screen reports, matching what will actually be used.
+    private var canSendToKindle: Bool { kindleValid && mailReady }
+
+    private var desktopOn: Bool {
+        var preview = draft
+        preview.chooseDestinationsAfterSetup(firstRun: !preferences.setupFinished)
+        return preview.saveToDesktop
     }
 
     /// Approving the sender only matters when there is both a Kindle and a
@@ -307,13 +376,13 @@ private struct SetupView: View {
         }
     }
 
-    /// The Kindle is optional, and so is email when there is no Kindle to
-    /// send to — Desktop copies need neither. Instaparser is always optional.
+    /// The Kindle is optional, and so is email — a Desktop copy needs neither,
+    /// and someone without a usable email account still gets that. Instaparser
+    /// is always optional.
     private var canSkip: Bool {
         switch step {
         case .kindle: return trimmed(draft.kindleAddress).isEmpty
-        case .mail: return !kindleValid
-        case .reader: return true
+        case .mail, .reader: return true
         case .approve, .done: return false
         }
     }
