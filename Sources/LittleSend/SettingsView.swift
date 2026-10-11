@@ -6,74 +6,13 @@ struct SettingsView: View {
 
     @State private var draft = SettingsDraft()
     @State private var signedOut = false
-    @State private var status: Status?
     @State private var selectedAddress: String?
     @State private var newAddressText = ""
     @State private var search = ""
     /// The pane last looked at, so Settings reopens where it was left.
     @AppStorage("settingsPane") private var lastPane = Pane.general.rawValue
 
-    private enum Status: Equatable {
-        case saved
-    }
-
-    /// The sidebar's panes, System Settings style: a coloured icon for each.
-    private enum Pane: String, CaseIterable, Identifiable {
-        case general, destinations, account, reading, cover, images
-
-        var id: Self { self }
-
-        var title: String {
-            switch self {
-            case .general: return "General"
-            case .destinations: return "Destinations"
-            case .account: return "Mail Account"
-            case .reading: return "Reading"
-            case .cover: return "Cover"
-            case .images: return "Images"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .general: return "gearshape.fill"
-            case .destinations: return "paperplane.fill"
-            case .account: return "envelope.fill"
-            case .reading: return "doc.text.fill"
-            case .cover: return "book.closed.fill"
-            case .images: return "photo.fill"
-            }
-        }
-
-        var tint: Color {
-            switch self {
-            case .general: return .gray
-            case .destinations: return .blue
-            case .account: return .teal
-            case .reading: return .orange
-            case .cover: return .purple
-            case .images: return .green
-            }
-        }
-
-        /// Words a search should find this pane by, beyond its title.
-        var keywords: [String] {
-            switch self {
-            case .general: return ["dock", "menu bar", "icon", "browser", "link", "clipboard", "sound", "chime"]
-            case .destinations: return ["kindle", "email", "address", "recipient", "attach", "epub"]
-            case .account: return ["sender", "from", "mail server", "smtp", "port", "username", "password", "gmail"]
-            case .reading: return ["instaparser", "api key", "reader", "paywall", "sign in", "sign out", "subscription"]
-            case .cover: return ["layout", "font", "size", "e-ink", "gray", "grey"]
-            case .images: return ["image", "picture", "shrink", "size", "kb"]
-            }
-        }
-
-        func matches(_ query: String) -> Bool {
-            let query = query.trimmingCharacters(in: .whitespaces).lowercased()
-            guard !query.isEmpty else { return true }
-            return title.lowercased().contains(query) || keywords.contains { $0.contains(query) }
-        }
-    }
+    private typealias Pane = SettingsPane
 
     /// Sidebar groups, as headings over the panes.
     private static let groups: [(title: String, panes: [Pane])] = [
@@ -104,11 +43,6 @@ struct SettingsView: View {
         return "\(chosen) isn't installed, so covers will use Georgia."
     }
 
-    /// Nothing to save until something actually differs from what is stored.
-    private var hasChanges: Bool {
-        draft.normalized != preferences.draft.normalized
-    }
-
     var body: some View {
         // A sidebar of panes, as System Settings does it. Each pane holds one
         // kind of thing; the old General tab had grown to six unrelated ones.
@@ -118,23 +52,21 @@ struct SettingsView: View {
             let current = pane.wrappedValue ?? .general
             VStack(alignment: .leading, spacing: 0) {
                 // The pane's name as a heading at the top left, where System
-                // Settings puts it.
-                Text(current.title)
-                    .font(.title2.weight(.semibold))
-                    .padding(.horizontal, 26)
-                    // Level with the window controls, as in System Settings.
-                    .padding(.top, 6)
+                // Settings puts it, level with the window controls.
+                HStack(alignment: .firstTextBaseline) {
+                    Text(current.title)
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    missingItems
+                }
+                .padding(.horizontal, 26)
+                .padding(.top, 6)
 
                 content(for: current)
                     .frame(maxHeight: .infinity)
                     // On the pane, which is always on screen; on the split
                     // view itself it is never put in the window at all.
                     .background(HiddenTitleBar())
-
-                // Save and Revert sit under every pane: the draft is one
-                // value, so an edit anywhere is part of the same change.
-                Divider()
-                footer
             }
             // Still the window's title, for the Window menu; with the toolbar
             // hidden it is not drawn over the pane as well.
@@ -144,10 +76,21 @@ struct SettingsView: View {
         // window controls in it, and the pane starts right under the top edge.
         .toolbar(.hidden, for: .windowToolbar)
         .frame(width: 820, height: 680)
-        .onAppear { revert() }
-        // Clear a stale "Saved" note as soon as the user edits again.
-        .onChange(of: draft) { _, _ in
-            if status == .saved { status = nil }
+        // Saved as you go, like System Settings. The draft is still kept
+        // here rather than editing the stored settings directly: storing trims
+        // whitespace, and trimming the field being typed in would eat the space
+        // in "abcd efgh" before the next letter arrived.
+        .onAppear { draft = preferences.draft }
+        .onChange(of: draft) { _, edited in
+            preferences.apply(edited)
+        }
+        // The panel changes settings too — its destination chips — and an
+        // open Settings window must take those in, or its next save would put
+        // the old values back. After a save of our own the two already agree.
+        .onChange(of: preferences.draft) { _, stored in
+            if stored != draft.normalized {
+                draft = stored
+            }
         }
     }
 
@@ -172,6 +115,23 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            if !Pane.allCases.contains(where: { $0.matches(search) }) {
+                Text("No Results")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 12)
+                    .selectionDisabled()
+            }
+        }
+        // Searching moves to the first pane that matches whenever the one on
+        // screen no longer does, so what was found is what is shown.
+        .onChange(of: search) { _, query in
+            let current = pane.wrappedValue ?? .general
+            guard !current.matches(query),
+                  let first = Self.groups.flatMap(\.panes).first(where: { $0.matches(query) })
+            else { return }
+            pane.wrappedValue = first
         }
         // Never the keyboard focus, so the selection stays the soft grey
         // System Settings uses rather than the accent colour a focused list
@@ -208,8 +168,8 @@ struct SettingsView: View {
                         Text(placement.displayName).tag(placement)
                     }
                 } label: {
-                    Text("Show LittleSend in")
-                    Text("Menu bar only keeps LittleSend out of the Dock and ⌘Tab, but its menus won't show.")
+                    Text(SettingsCopy.General.showIn)
+                    Text(SettingsCopy.General.showInNote)
                 }
 
                 Picker(selection: $draft.browserSource) {
@@ -217,13 +177,13 @@ struct SettingsView: View {
                         Text(source.displayName).tag(source)
                     }
                 } label: {
-                    Text("Fill the link from")
-                    Text("macOS asks once before LittleSend can read your browser. If no page is open, it uses the clipboard.")
+                    Text(SettingsCopy.General.fillLink)
+                    Text(SettingsCopy.General.fillLinkNote)
                 }
 
                 Toggle(isOn: $draft.playSounds) {
-                    Text("Play sounds")
-                    Text("A chime when a send works, and a low tone if it fails.")
+                    Text(SettingsCopy.General.sounds)
+                    Text(SettingsCopy.General.soundsNote)
                 }
             }
         }
@@ -234,14 +194,14 @@ struct SettingsView: View {
 
     private var destinationsPane: some View {
         Form {
-            Section("Kindle") {
+            Section(SettingsCopy.Destinations.kindleSection) {
                 LabeledContent {
-                    TextField("Send to Kindle address", text: $draft.kindleAddress)
+                    TextField(SettingsCopy.Destinations.kindleAddress, text: $draft.kindleAddress)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                 } label: {
-                    Text("Send to Kindle address")
-                    Text("Find it on Amazon under Manage Your Content and Devices → Preferences → Personal Document Settings.")
+                    Text(SettingsCopy.Destinations.kindleAddress)
+                    Text(SettingsCopy.Destinations.kindleAddressNote)
                 }
             }
 
@@ -250,7 +210,7 @@ struct SettingsView: View {
 
                 HStack {
                     TextField(
-                        "Add address",
+                        SettingsCopy.Destinations.addAddress,
                         text: $newAddressText,
                         prompt: Text("someone@example.com")
                     )
@@ -275,16 +235,16 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
             } header: {
-                Text("Email addresses")
+                Text(SettingsCopy.Destinations.addressesSection)
             } footer: {
-                SectionNote("Your address book. Pick who gets each send in the panel.")
+                SectionNote(SettingsCopy.Destinations.addressesNote)
             }
 
-            Section("Email messages") {
-                Toggle("Show images in the email", isOn: $draft.embedImagesInEmail)
+            Section(SettingsCopy.Destinations.messagesSection) {
+                Toggle(SettingsCopy.Destinations.showImages, isOn: $draft.embedImagesInEmail)
                     .disabled(draft.emailRecipients.isEmpty)
 
-                Toggle("Also attach the EPUB", isOn: $draft.attachBookToEmail)
+                Toggle(SettingsCopy.Destinations.attachEPUB, isOn: $draft.attachBookToEmail)
                     .disabled(draft.emailRecipients.isEmpty)
             }
         }
@@ -295,26 +255,26 @@ struct SettingsView: View {
 
     private var accountPane: some View {
         Form {
-            Section("Sender") {
+            Section(SettingsCopy.Account.senderSection) {
                 LabeledContent {
-                    TextField("From address", text: $draft.fromAddress)
+                    TextField(SettingsCopy.Account.fromAddress, text: $draft.fromAddress)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                 } label: {
-                    Text("From address")
-                    Text("Add this address to your Approved Personal Document E-mail List on Amazon. If you don't, Amazon drops your sends.")
+                    Text(SettingsCopy.Account.fromAddress)
+                    Text(SettingsCopy.Account.fromAddressNote)
                 }
             }
 
             Section {
-                TextField("Mail server", text: $draft.smtpHost)
-                TextField("Port", value: $draft.smtpPort, format: .number.grouping(.never))
-                TextField("Username", text: $draft.smtpUsername)
-                SecureField("Password", text: $draft.smtpPassword)
+                TextField(SettingsCopy.Account.server, text: $draft.smtpHost)
+                TextField(SettingsCopy.Account.port, value: $draft.smtpPort, format: .number.grouping(.never))
+                TextField(SettingsCopy.Account.username, text: $draft.smtpUsername)
+                SecureField(SettingsCopy.Account.password, text: $draft.smtpPassword)
             } header: {
-                Text("Outgoing mail")
+                Text(SettingsCopy.Account.outgoingSection)
             } footer: {
-                SectionNote("For Gmail, turn on 2-Step Verification and use an app password. Use port 465. The password is saved as plain text in LittleSend's settings, not in the Keychain.")
+                SectionNote(SettingsCopy.Account.outgoingNote)
             }
         }
         .formStyle(.grouped)
@@ -330,47 +290,47 @@ struct SettingsView: View {
                         Text(reader.displayName).tag(reader)
                     }
                 } label: {
-                    Text("Read articles with")
+                    Text(SettingsCopy.Reading.readWith)
                     Text(readerNote)
                 }
 
                 if draft.articleReader == .instaparser {
                     LabeledContent {
-                        SecureField("Instaparser API key", text: $draft.instaparserAPIKey)
+                        SecureField(SettingsCopy.Reading.apiKey, text: $draft.instaparserAPIKey)
                             .labelsHidden()
                     } label: {
-                        Text("Instaparser API key")
-                        Text("Saved as plain text in LittleSend's settings.")
+                        Text(SettingsCopy.Reading.apiKey)
+                        Text(SettingsCopy.Reading.apiKeyNote)
                     }
 
                     LabeledContent {
-                        Link("Get a free key", destination: URL(string: "https://www.instaparser.com")!)
+                        Link(SettingsCopy.Reading.getKey, destination: URL(string: "https://www.instaparser.com")!)
                     } label: {
-                        Text("No key yet?")
-                        Text("The free plan covers 1,000 articles a month.")
+                        Text(SettingsCopy.Reading.noKey)
+                        Text(SettingsCopy.Reading.noKeyNote)
                     }
                 }
             }
 
-            Section("Paywalls") {
+            Section(SettingsCopy.Reading.paywallsSection) {
                 LabeledContent {
-                    Button("Sign In…") { SiteSignInWindow.shared.show() }
+                    Button(SettingsCopy.Reading.signInButton) { SiteSignInWindow.shared.show() }
                 } label: {
-                    Text("Sign in to a site")
-                    Text("Pay for a site? Sign in once to get full articles. LittleSend can't use Safari's sign-ins.")
+                    Text(SettingsCopy.Reading.signIn)
+                    Text(SettingsCopy.Reading.signInNote)
                 }
 
                 LabeledContent {
-                    Button("Sign Out") {
+                    Button(SettingsCopy.Reading.signOutButton) {
                         Task {
                             await SiteSignInWindow.signOutOfAllSites()
                             signedOut = true
                         }
                     }
                 } label: {
-                    Text("Sign out of all sites")
+                    Text(SettingsCopy.Reading.signOut)
                     if signedOut {
-                        Text("Signed out of all sites.")
+                        Text(SettingsCopy.Reading.signedOut)
                     }
                 }
             }
@@ -379,12 +339,7 @@ struct SettingsView: View {
     }
 
     private var readerNote: String {
-        switch draft.articleReader {
-        case .local:
-            return "Reads articles on this Mac. It's free and private, and it reads every page of long articles."
-        case .instaparser:
-            return "Much faster, usually under a second. Instaparser sees each link you send. If it can't read one, LittleSend reads it on this Mac."
-        }
+        SettingsCopy.Reading.note(for: draft.articleReader)
     }
 
     // MARK: - Cover art
@@ -399,12 +354,12 @@ struct SettingsView: View {
                 )
                 .frame(maxWidth: .infinity)
             } header: {
-                Text("Layout")
+                Text(SettingsCopy.Cover.layoutSection)
             } footer: {
                 SectionNote(draft.coverLayout.summary)
             }
 
-            Section("Type") {
+            Section(SettingsCopy.Cover.typeSection) {
                 Picker(selection: $draft.coverFontFamily) {
                     Text(CoverFont.systemFamilyLabel).tag("")
                     Divider()
@@ -412,8 +367,8 @@ struct SettingsView: View {
                         Text(family).tag(family)
                     }
                 } label: {
-                    Text("Cover font")
-                    Text("Any font on this Mac works. The article uses your Kindle's own fonts.")
+                    Text(SettingsCopy.Cover.font)
+                    Text(SettingsCopy.Cover.fontNote)
                 }
 
                 if let warning = coverFontWarning {
@@ -423,19 +378,19 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Rendering") {
+            Section(SettingsCopy.Cover.renderingSection) {
                 Picker(selection: $draft.coverSize) {
                     ForEach(CoverSize.allCases, id: \.self) { size in
                         Text(size.displayName).tag(size)
                     }
                 } label: {
-                    Text("Size")
+                    Text(SettingsCopy.Cover.size)
                     Text(draft.coverSize.summary)
                 }
 
                 Toggle(isOn: $draft.optimizeCoverForEInk) {
-                    Text("Optimize Kindle covers for e-ink")
-                    Text("Kindle covers use the 16 grays an e-ink screen can show. Desktop and email covers stay in color.")
+                    Text(SettingsCopy.Cover.eInk)
+                    Text(SettingsCopy.Cover.eInkNote)
                 }
             }
         }
@@ -447,15 +402,15 @@ struct SettingsView: View {
     private var imagesPane: some View {
         Form {
             Section {
-                Toggle("Include images in the EPUB", isOn: $draft.embedImages)
+                Toggle(SettingsCopy.Images.include, isOn: $draft.embedImages)
 
                 Toggle(isOn: $draft.limitImageSize) {
-                    Text("Shrink large images")
-                    Text("Bigger images are shrunk to fit. Each one links to the full-size original.")
+                    Text(SettingsCopy.Images.shrink)
+                    Text(SettingsCopy.Images.shrinkNote)
                 }
                 .disabled(!draft.embedImages)
 
-                LabeledContent("Maximum size") {
+                LabeledContent(SettingsCopy.Images.maximumSize) {
                     HStack(spacing: 4) {
                         TextField(
                             "size",
@@ -475,22 +430,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-    }
-
-    // MARK: - Save and Revert
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            statusLabel
-            Spacer()
-            Button("Revert", action: revert)
-                .disabled(!hasChanges)
-            Button("Save", action: save)
-                .keyboardShortcut(.defaultAction)
-                .disabled(!hasChanges)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
     }
 
     /// `Table` requires `Identifiable` rows; addresses are unique after
@@ -528,38 +467,21 @@ struct SettingsView: View {
         newAddressText = ""
     }
 
+    /// Anything still needed before a send can work — shown beside the
+    /// heading, with the details on hover. Saved settings, so it updates as
+    /// fields are filled in.
     @ViewBuilder
-    private var statusLabel: some View {
+    private var missingItems: some View {
         let problems = draft.settingsProblems
-
-        if hasChanges {
-            Label("Unsaved changes", systemImage: "pencil.circle")
-                .font(.appLabel)
-                .foregroundStyle(.secondary)
-        } else if status == .saved {
-            Label("Saved", systemImage: "checkmark.circle.fill")
-                .font(.appLabel)
-                .foregroundStyle(.green)
-        } else if !problems.isEmpty {
-            // Saved, but still not enough to send anything.
-            Label("\(problems.count) item\(problems.count == 1 ? "" : "s") still needed", systemImage: "exclamationmark.circle")
-                .font(.appLabel)
-                .foregroundStyle(.orange)
-                .help(problems.joined(separator: "\n"))
+        if !problems.isEmpty {
+            Label(
+                "\(problems.count) item\(problems.count == 1 ? "" : "s") still needed",
+                systemImage: "exclamationmark.circle"
+            )
+            .font(.appLabel)
+            .foregroundStyle(.orange)
+            .help(problems.joined(separator: "\n"))
         }
-    }
-
-    private func save() {
-        preferences.apply(draft)
-        status = .saved
-        // Re-read so the fields show exactly what was stored (trimmed values).
-        draft = preferences.draft
-    }
-
-    private func revert() {
-        draft = preferences.draft
-        status = nil
-        selectedAddress = nil
     }
 }
 
@@ -632,5 +554,30 @@ private struct PaneIcon: View {
                 RoundedRectangle(cornerRadius: 4.5, style: .continuous)
                     .fill(tint.gradient)
             )
+    }
+}
+
+/// Sidebar presentation for each pane: a white symbol on a coloured square.
+private extension SettingsPane {
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape.fill"
+        case .destinations: return "paperplane.fill"
+        case .account: return "envelope.fill"
+        case .reading: return "doc.text.fill"
+        case .cover: return "book.closed.fill"
+        case .images: return "photo.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .general: return .gray
+        case .destinations: return .blue
+        case .account: return .teal
+        case .reading: return .orange
+        case .cover: return .purple
+        case .images: return .green
+        }
     }
 }
