@@ -20,20 +20,17 @@ and `./Scripts/install.sh ~/Applications` installs somewhere else.
 
 The app has a Dock icon and a menubar icon; either one opens it. Open it and choose **Settings…**.
 
-Everything is configurable; the fields are prefilled with sensible defaults:
+The fields start empty apart from the Gmail server. Fill in your own:
 
-| Setting | Default |
+| Setting | Example |
 | --- | --- |
 | Send to Kindle address | `yourname@kindle.com` |
 | From address | `you@gmail.com` |
-| SMTP server / port | `smtp.gmail.com` / `465` |
-| SMTP username | `you@gmail.com` |
-| Email recipients | *(empty)* |
+| Mail server / port | `smtp.gmail.com` / `465` *(the default)* |
+| Username | `you@gmail.com` |
+| Email addresses | *(optional)* |
 
-Settings edits a draft and commits it when you press **Save** (Revert discards).
-Nothing is written until then, so a half-typed address never reaches the send
-pipeline and the Keychain is touched once per save rather than once per
-keystroke.
+Settings saves as you go, like System Settings — there is no Save button.
 
 All settings, **including the SMTP password**, are
 stored in the app's UserDefaults plist in plain text. That file is readable by
@@ -50,7 +47,7 @@ its spaces.
 1. **Create a Gmail app password.** Google rejects your normal account password
    over SMTP. With 2-Step Verification on, generate a 16-character app password
    at <https://myaccount.google.com/apppasswords> and paste it into Settings.
-2. **Approve the sender with Amazon.** Add `you@gmail.com` to the
+2. **Approve the sender with Amazon.** Add your From address to the
    Approved Personal Document E-mail List under *Manage Your Content and
    Devices → Preferences → Personal Document Settings*. Amazon silently drops
    mail from unapproved addresses — there is no bounce and no error.
