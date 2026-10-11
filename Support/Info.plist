@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>LittleSend</string>
     <key>CFBundleIdentifier</key>
-    <string>com.kindleclip.KindleClip</string>
+    <string>com.andrewmeyers.LittleSend</string>
     <key>CFBundleExecutable</key>
     <string>LittleSend</string>
     <key>CFBundlePackageType</key>

@@ -77,6 +77,14 @@ final class Preferences: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // Before anything is read: the app's bundle ID changed, and its
+        // settings are still filed under the old one until copied across.
+        // Only for the real app — a demo copy under another ID (used for
+        // screenshots) must start empty, not inherit the owner's addresses.
+        if defaults === UserDefaults.standard,
+           Bundle.main.bundleIdentifier == "com.andrewmeyers.LittleSend" {
+            SettingsMigration.run(into: defaults)
+        }
 
         // Empty until set, so nothing personal ships in the app. The Gmail server
         // and port are the one prefill — they are the same for every Gmail user.
