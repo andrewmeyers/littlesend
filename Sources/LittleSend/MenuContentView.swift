@@ -334,7 +334,7 @@ struct MenuContentView: View {
     /// sent — better to hear about a typo here than after choosing where it goes.
     private func advanceFromSource() {
         guard hasInput else { return }
-        if !fileStaged, AppModel.normalizedURL(from: model.urlText) == nil {
+        if !fileStaged, ArticleLink.normalizedURL(from: model.urlText) == nil {
             model.banner = AppModel.Banner(kind: .failure, message: "That isn't a web address.")
             return
         }
@@ -596,7 +596,7 @@ struct MenuContentView: View {
 
     private var setupPrompt: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Finish setup before sending")
+            Text("Finish setup to send by email")
                 .font(.appLabel.bold())
             ForEach(preferences.draft.settingsProblems, id: \.self) { problem in
                 Text("• \(problem)")

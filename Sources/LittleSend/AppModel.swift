@@ -123,7 +123,7 @@ final class AppModel: ObservableObject {
         guard urlText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         guard let contents = NSPasteboard.general.string(forType: .string) else { return }
         let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.normalizedURL(from: trimmed) != nil else { return }
+        guard ArticleLink.normalizedURL(from: trimmed) != nil else { return }
         urlText = trimmed
     }
 
@@ -159,7 +159,7 @@ final class AppModel: ObservableObject {
         }
 
         let raw = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = Self.normalizedURL(from: raw) else {
+        guard let url = ArticleLink.normalizedURL(from: raw) else {
             banner = Banner(kind: .failure, message: "That isn't a web address.")
             return
         }
@@ -398,19 +398,4 @@ final class AppModel: ObservableObject {
         if activity != .sending { activity = .idle }
     }
 
-    /// Accepts input with or without a scheme, rejecting anything that is not
-    /// plausibly an http(s) address.
-    static func normalizedURL(from input: String) -> URL? {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return nil }
-
-        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard let url = URL(string: candidate),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = url.host,
-              host.contains(".")
-        else { return nil }
-        return url
-    }
 }
