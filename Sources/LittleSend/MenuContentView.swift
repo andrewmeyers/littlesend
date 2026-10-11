@@ -61,7 +61,9 @@ struct MenuContentView: View {
                 bannerView(banner)
             }
 
-            if !preferences.isConfigured {
+            if preferences.needsSetup {
+                firstRunCard
+            } else if !preferences.isConfigured {
                 setupPrompt
             }
 
@@ -572,6 +574,24 @@ struct MenuContentView: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// Setup was closed before it was finished: a way back to it.
+    private var firstRunCard: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Set up LittleSend")
+                    .font(.appLabel.bold())
+                Text("Add your Kindle and email so you can send.")
+                    .font(.appLabel)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Set Up…") { SetupWindow.shared.show(preferences: preferences) }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var setupPrompt: some View {

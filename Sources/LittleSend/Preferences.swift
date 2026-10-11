@@ -37,6 +37,9 @@ final class Preferences: ObservableObject {
     @Published private(set) var playSounds: Bool
     @Published private(set) var browserSource: BrowserSource
     @Published private(set) var iconPlacement: IconPlacement
+    /// The first-run setup was completed (or deliberately finished with
+    /// nothing filled in, for Desktop-only use).
+    @Published private(set) var setupFinished: Bool
     @Published private(set) var articleReader: ArticleReader
     @Published private(set) var instaparserAPIKey: String
 
@@ -70,6 +73,7 @@ final class Preferences: ObservableObject {
         static let playSounds = "playSounds"
         static let browserSource = "browserSource"
         static let iconPlacement = "iconPlacement"
+        static let setupFinished = "setupFinished"
         static let articleReader = "articleReader"
         static let instaparserAPIKey = "instaparserAPIKey"
         static let smtpPassword = "smtpPassword"
@@ -85,6 +89,7 @@ final class Preferences: ObservableObject {
            Bundle.main.bundleIdentifier == "com.andrewmeyers.LittleSend" {
             SettingsMigration.run(into: defaults)
         }
+        setupFinished = defaults.bool(forKey: Keys.setupFinished)
 
         // Empty until set, so nothing personal ships in the app. The Gmail server
         // and port are the one prefill — they are the same for every Gmail user.
@@ -296,4 +301,16 @@ final class Preferences: ObservableObject {
     var configuration: SendConfiguration { draft.configuration }
 
     var isConfigured: Bool { draft.settingsProblems.isEmpty }
+
+    /// Nothing that sends anything is set up yet, and setup was never
+    /// finished: a first run. Anyone who already has an address in place —
+    /// every existing user — never sees setup.
+    var needsSetup: Bool {
+        !setupFinished && kindleAddress.isEmpty && fromAddress.isEmpty && emailAddresses.isEmpty
+    }
+
+    func markSetupFinished() {
+        setupFinished = true
+        defaults.set(true, forKey: Keys.setupFinished)
+    }
 }

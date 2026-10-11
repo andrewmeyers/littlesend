@@ -111,7 +111,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Launching the app means wanting to use it: open the main panel, not
         // Settings. A turn of the run loop later, so the menu bar has placed
         // the icon the popover hangs from.
-        DispatchQueue.main.async { [weak self] in self?.show() }
+        // A first run opens setup instead; finishing it opens the panel.
+        SetupWindow.shared.onFinish = { [weak self] in self?.show() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.preferences.needsSetup {
+                SetupWindow.shared.show(preferences: self.preferences)
+            } else {
+                self.show()
+            }
+        }
     }
 
     private func rootView() -> AnyView {
