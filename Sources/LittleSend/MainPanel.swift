@@ -63,6 +63,10 @@ final class MainPanel {
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.isMovableByWindowBackground = true
+        // The panel can't be minimized or resized, so those two buttons would
+        // only be grey dots that do nothing. Close is all it needs.
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.level = .floating
         // The point of the change: it must survive the app losing focus.
         panel.hidesOnDeactivate = false
