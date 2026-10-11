@@ -35,7 +35,7 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
     /// Words people search for that the pane's own text does not use.
     var synonyms: [String] {
         switch self {
-        case .general: return ["appearance", "chime", "beep", "startup"]
+        case .general: return ["appearance", "chime", "beep", "startup", "first run", "onboarding", "welcome", "wizard", "walkthrough", "setup"]
         case .destinations: return ["recipients", "contacts", "inbox"]
         case .account: return ["smtp", "credentials", "login", "app password", "server", "tls", "ssl"]
         case .reading: return ["parser", "readability", "subscription", "login", "token", "speed", "fast"]
@@ -75,9 +75,14 @@ public enum SettingsCopy {
         public static let fillLinkNote = "macOS asks once before LittleSend can read your browser. If no page is open, it uses the clipboard."
         public static let sounds = "Play sounds"
         public static let soundsNote = "A chime when a send works, and a low tone if it fails."
+        public static let setupSection = "Setup"
+        public static let runSetup = "Run setup again"
+        public static let runSetupNote = "Go through the first-run steps again. Your details are already filled in."
+        public static let runSetupButton = "Start…"
 
         static var all: [String] {
-            [showIn, showInNote, fillLink, fillLinkNote, sounds, soundsNote]
+            [showIn, showInNote, fillLink, fillLinkNote, sounds, soundsNote,
+             setupSection, runSetup, runSetupNote]
                 + IconPlacement.allCases.map(\.displayName)
                 + BrowserSource.allCases.map(\.displayName)
         }

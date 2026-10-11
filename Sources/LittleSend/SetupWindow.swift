@@ -94,6 +94,11 @@ private struct SetupView: View {
         // which trims, never rewrites the field mid-word.
         .onAppear { draft = preferences.draft }
         .onChange(of: draft) { _, edited in preferences.apply(edited) }
+        // Opened from Settings, setup can sit beside it: take in anything
+        // changed there, or the next keystroke here would put old values back.
+        .onChange(of: preferences.draft) { _, stored in
+            if stored != draft.normalized { draft = stored }
+        }
         // The username is the email address for Gmail and most others, so it
         // follows the From address until it is changed by hand.
         .onChange(of: draft.fromAddress) { old, new in

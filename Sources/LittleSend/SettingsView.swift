@@ -186,6 +186,17 @@ struct SettingsView: View {
                     Text(SettingsCopy.General.soundsNote)
                 }
             }
+
+            Section(SettingsCopy.General.setupSection) {
+                LabeledContent {
+                    Button(SettingsCopy.General.runSetupButton) {
+                        SetupWindow.shared.show(preferences: preferences)
+                    }
+                } label: {
+                    Text(SettingsCopy.General.runSetup)
+                    Text(SettingsCopy.General.runSetupNote)
+                }
+            }
         }
         .formStyle(.grouped)
     }

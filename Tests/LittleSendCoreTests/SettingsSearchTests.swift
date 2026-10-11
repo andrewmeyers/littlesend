@@ -34,6 +34,12 @@ final class SettingsSearchTests: XCTestCase {
         XCTAssertTrue(panes(matching: "instaparser").contains(.reading))
     }
 
+    func testRunningSetupAgainIsSearchable() {
+        XCTAssertEqual(panes(matching: "run setup again"), [.general])
+        XCTAssertTrue(panes(matching: "first run").contains(.general))
+        XCTAssertTrue(panes(matching: "onboarding").contains(.general))
+    }
+
     func testSynonymsFindPanesTheirTextDoesNotName() {
         XCTAssertEqual(panes(matching: "smtp"), [.account])
         XCTAssertTrue(panes(matching: "grey").contains(.cover))
